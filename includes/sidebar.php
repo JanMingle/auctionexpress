@@ -69,6 +69,11 @@ if (!function_exists("isActivePage")) {
                 Members
             </a>
 
+            <a href="<?php echo $appBase; ?>/admin/admins.php" class="sidebar-link <?php echo isActivePage('admins.php'); ?>">
+    <span class="sidebar-dot"></span>
+    Admin Users
+</a>
+
             <a href="<?php echo $appBase; ?>/admin/savings_requests.php" class="sidebar-link <?php echo isActivePage('savings_requests.php'); ?>">
                 <span class="sidebar-dot"></span>
                 Saving Requests
