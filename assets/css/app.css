@@ -1,0 +1,742 @@
+:root {
+    --green: #0f6b4f;
+    --green-dark: #073f2f;
+    --green-soft: #eef7f1;
+    --gold: #d8a928;
+    --gold-soft: #fff8df;
+    --cream: #fbf7ed;
+    --soft: #f5efe1;
+    --ink: #10241f;
+    --muted: #667085;
+    --border: rgba(16, 36, 31, 0.12);
+    --shadow: 0 18px 50px rgba(16, 36, 31, 0.10);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background:
+        radial-gradient(circle at top left, rgba(216, 169, 40, 0.16), transparent 32%),
+        radial-gradient(circle at bottom right, rgba(15, 107, 79, 0.14), transparent 34%),
+        linear-gradient(135deg, #fbf7ed 0%, #f5efe1 45%, #edf7f1 100%);
+    font-family: Arial, sans-serif;
+    color: var(--ink);
+}
+
+/* =========================
+   App Shell
+========================= */
+
+.app-shell {
+    display: flex;
+    min-height: 100vh;
+}
+
+.app-sidebar {
+    width: 280px;
+    background:
+        radial-gradient(circle at 20% 10%, rgba(216, 169, 40, 0.20), transparent 30%),
+        linear-gradient(180deg, var(--green-dark), var(--green));
+    color: #ffffff;
+    padding: 22px 18px;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    overflow-y: auto;
+    box-shadow: 18px 0 45px rgba(16, 36, 31, 0.16);
+}
+
+.app-brand {
+    padding: 18px;
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255,255,255,0.13);
+    margin-bottom: 22px;
+}
+
+.app-brand-title {
+    font-size: 18px;
+    font-weight: 900;
+    margin-bottom: 5px;
+    letter-spacing: -0.02em;
+}
+
+.app-brand-subtitle {
+    font-size: 12px;
+    color: rgba(255,255,255,0.72);
+}
+
+/* =========================
+   Sidebar
+========================= */
+
+.sidebar-section {
+    margin-bottom: 22px;
+}
+
+.sidebar-section-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.10em;
+    color: rgba(255,255,255,0.55);
+    margin-bottom: 10px;
+    padding-left: 12px;
+    font-weight: 800;
+}
+
+.sidebar-link,
+.sidebar-muted {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    color: rgba(255,255,255,0.82);
+    text-decoration: none;
+    font-size: 14px;
+    padding: 12px 13px;
+    border-radius: 16px;
+    margin-bottom: 6px;
+    transition: all 0.18s ease;
+}
+
+.sidebar-link:hover {
+    background: rgba(255,255,255,0.10);
+    color: #ffffff;
+    transform: translateX(2px);
+}
+
+.sidebar-link.active {
+    background: #ffffff;
+    color: var(--green-dark);
+    font-weight: 900;
+    box-shadow: 0 12px 25px rgba(0,0,0,0.12);
+}
+
+.sidebar-muted {
+    color: rgba(255,255,255,0.36);
+    cursor: not-allowed;
+}
+
+.sidebar-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: currentColor;
+    opacity: 0.9;
+}
+
+.sidebar-link.active .sidebar-dot {
+    background: var(--gold);
+}
+
+.sidebar-footer {
+    margin-top: 30px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255,255,255,0.13);
+}
+
+/* =========================
+   Main Area
+========================= */
+
+.app-main {
+    flex: 1;
+    margin-left: 280px;
+    min-height: 100vh;
+}
+
+.app-topbar {
+    background: rgba(255, 255, 255, 0.78);
+    backdrop-filter: blur(18px);
+    padding: 20px 30px;
+    border-bottom: 1px solid rgba(16, 36, 31, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+}
+
+.app-topbar-title {
+    font-weight: 900;
+    font-size: 18px;
+    color: var(--ink);
+    letter-spacing: -0.03em;
+}
+
+.app-topbar-subtitle {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 3px;
+}
+
+.app-content {
+    padding: 30px;
+}
+
+/* =========================
+   Cards
+========================= */
+
+.card-box,
+.stat-card {
+    background: rgba(255, 255, 255, 0.88);
+    border: 1px solid rgba(255,255,255,0.75);
+    border-radius: 26px;
+    padding: 24px;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px);
+}
+
+.stat-card {
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+}
+
+.stat-card::after {
+    content: "";
+    position: absolute;
+    width: 80px;
+    height: 80px;
+    right: -28px;
+    top: -28px;
+    border-radius: 50%;
+    background: rgba(216, 169, 40, 0.12);
+}
+
+.stat-label {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.stat-value {
+    font-size: 25px;
+    font-weight: 900;
+    color: var(--ink);
+    letter-spacing: -0.04em;
+    margin-top: 4px;
+}
+
+/* =========================
+   Forms
+========================= */
+
+.form-label {
+    font-size: 13px;
+    font-weight: 800;
+    color: #34433d;
+    margin-bottom: 8px;
+}
+
+.form-control {
+    border-radius: 18px;
+    padding: 13px 15px;
+    font-size: 14px;
+    border: 1px solid var(--border);
+    background: #ffffff;
+}
+
+.form-control:focus {
+    border-color: var(--green);
+    box-shadow: 0 0 0 4px rgba(15,107,79,0.12);
+}
+
+/* =========================
+   Buttons
+========================= */
+
+.btn {
+    border-radius: 16px;
+    font-weight: 800;
+}
+
+.btn-dark {
+    background: linear-gradient(135deg, var(--green), var(--green-dark));
+    border: 0;
+    color: #ffffff;
+    box-shadow: 0 12px 24px rgba(15,107,79,0.18);
+}
+
+.btn-dark:hover {
+    background: linear-gradient(135deg, var(--green-dark), var(--green));
+    color: #ffffff;
+    transform: translateY(-1px);
+}
+
+.btn-outline-dark {
+    border-color: rgba(16, 36, 31, 0.18);
+    color: var(--ink);
+    background: #ffffff;
+}
+
+.btn-outline-dark:hover {
+    background: var(--green-dark);
+    border-color: var(--green-dark);
+    color: #ffffff;
+}
+
+.btn-success {
+    background: var(--green);
+    border-color: var(--green);
+}
+
+.btn-warning {
+    background: var(--gold);
+    border-color: var(--gold);
+    color: #3b2a05;
+    font-weight: 900;
+}
+
+.btn-sm {
+    border-radius: 13px;
+    padding: 7px 11px;
+    font-size: 12px;
+}
+
+/* =========================
+   Tables
+========================= */
+
+.table {
+    font-size: 14px;
+    color: var(--ink);
+}
+
+.table thead th {
+    color: #54615c;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom-color: rgba(16,36,31,0.10);
+    white-space: nowrap;
+}
+
+.table td {
+    border-bottom-color: rgba(16,36,31,0.07);
+    vertical-align: middle;
+}
+
+.table tbody tr:hover {
+    background: rgba(15,107,79,0.035);
+}
+
+/* =========================
+   Badges
+========================= */
+
+.badge {
+    border-radius: 999px;
+    padding: 7px 11px;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.badge-pending {
+    background: #fff8df;
+    color: #7a5a09;
+}
+
+.badge-approved,
+.badge-active {
+    background: #e7f7ef;
+    color: var(--green-dark);
+}
+
+.badge-rejected,
+.badge-suspended {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+/* =========================
+   Special Boxes
+========================= */
+
+.invite-link {
+    background: #fffdf7;
+    border: 1px dashed rgba(216,169,40,0.45);
+    border-radius: 18px;
+    padding: 15px;
+    font-size: 13px;
+    word-break: break-all;
+    color: #4b3a12;
+}
+
+.live-return-box {
+    background: linear-gradient(135deg, #eef7f1, #fff8df);
+    border: 1px solid rgba(15,107,79,0.13);
+    border-radius: 22px;
+    padding: 18px;
+}
+
+.live-return-label {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.live-return-value {
+    font-size: 24px;
+    font-weight: 900;
+    color: var(--green-dark);
+    letter-spacing: -0.04em;
+}
+
+.alert {
+    border-radius: 18px;
+    font-size: 14px;
+}
+
+/* =========================
+   Chat Tweaks
+========================= */
+
+.chat-card,
+.members-card,
+.public-chat-card {
+    border-radius: 26px !important;
+    box-shadow: var(--shadow) !important;
+}
+
+.message-row.mine .message-bubble {
+    background: linear-gradient(135deg, var(--green), var(--green-dark)) !important;
+    border-color: var(--green-dark) !important;
+}
+
+.message-bubble.guest {
+    background: #fff8df !important;
+    border-color: rgba(216,169,40,0.45) !important;
+}
+
+/* =========================
+   Mobile
+========================= */
+
+@media (max-width: 900px) {
+    .app-shell {
+        display: block;
+    }
+
+    .app-sidebar {
+        position: relative;
+        width: 100%;
+        height: auto;
+        border-radius: 0 0 28px 28px;
+    }
+
+    .app-main {
+        margin-left: 0;
+    }
+
+    .app-content {
+        padding: 18px;
+    }
+
+    .app-topbar {
+        padding: 16px 18px;
+    }
+
+    .card-box,
+    .stat-card {
+        border-radius: 22px;
+        padding: 20px;
+    }
+}
+/* =========================
+   Strong Stokvel Background Upgrade
+========================= */
+
+html,
+body {
+    min-height: 100%;
+}
+
+body {
+    background:
+        radial-gradient(circle at 8% 10%, rgba(216, 169, 40, 0.38), transparent 28%),
+        radial-gradient(circle at 92% 16%, rgba(15, 107, 79, 0.34), transparent 30%),
+        radial-gradient(circle at 48% 88%, rgba(216, 169, 40, 0.22), transparent 34%),
+        linear-gradient(135deg, #fff4c7 0%, #fbf7ed 30%, #e3f6eb 72%, #d9f0e4 100%) !important;
+    background-attachment: fixed;
+}
+
+.app-main {
+    background:
+        radial-gradient(circle at 15% 15%, rgba(216, 169, 40, 0.16), transparent 30%),
+        radial-gradient(circle at 90% 22%, rgba(15, 107, 79, 0.12), transparent 32%);
+}
+
+.app-content {
+    position: relative;
+}
+
+.app-content::before {
+    content: "R";
+    position: fixed;
+    right: 42px;
+    bottom: 34px;
+    z-index: 0;
+    width: 170px;
+    height: 170px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, rgba(248, 216, 106, 0.42), rgba(216, 169, 40, 0.26));
+    color: rgba(74, 53, 4, 0.18);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 82px;
+    font-weight: 900;
+    transform: rotate(-14deg);
+    pointer-events: none;
+}
+
+.app-content > * {
+    position: relative;
+    z-index: 1;
+}
+
+/* =========================
+   Strong Colourful Cards
+========================= */
+
+.stat-card {
+    border: 1px solid rgba(255,255,255,0.85) !important;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 18px 45px rgba(16, 36, 31, 0.13) !important;
+}
+
+.stat-card::before {
+    content: "";
+    position: absolute;
+    width: 150px;
+    height: 150px;
+    right: -55px;
+    bottom: -65px;
+    border-radius: 50%;
+    opacity: 0.35;
+}
+
+.stat-card::after {
+    content: "R";
+    position: absolute;
+    right: 18px;
+    top: 12px;
+    font-size: 36px;
+    font-weight: 900;
+    opacity: 0.08;
+}
+
+.stat-card .stat-label,
+.stat-card .stat-value {
+    position: relative;
+    z-index: 2;
+}
+
+.stat-card-green {
+    background: linear-gradient(135deg, #ffffff 0%, #d8f5e5 100%) !important;
+}
+
+.stat-card-green::before {
+    background: #0f6b4f;
+}
+
+.stat-card-green .stat-value {
+    color: #073f2f !important;
+}
+
+.stat-card-gold {
+    background: linear-gradient(135deg, #ffffff 0%, #ffed9f 100%) !important;
+}
+
+.stat-card-gold::before {
+    background: #d8a928;
+}
+
+.stat-card-gold .stat-value {
+    color: #7a5a09 !important;
+}
+
+.stat-card-blue {
+    background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%) !important;
+}
+
+.stat-card-blue::before {
+    background: #2563eb;
+}
+
+.stat-card-blue .stat-value {
+    color: #1e3a8a !important;
+}
+
+.stat-card-red {
+    background: linear-gradient(135deg, #ffffff 0%, #ffd6d6 100%) !important;
+}
+
+.stat-card-red::before {
+    background: #dc2626;
+}
+
+.stat-card-red .stat-value {
+    color: #991b1b !important;
+}
+
+/* =========================
+   Strong Coloured Content Cards
+========================= */
+
+.card-box {
+    border: 1px solid rgba(255,255,255,0.85) !important;
+    box-shadow: 0 18px 45px rgba(16, 36, 31, 0.12) !important;
+}
+
+.card-box-soft-green {
+    background:
+        radial-gradient(circle at top right, rgba(15,107,79,0.18), transparent 34%),
+        linear-gradient(135deg, #ffffff 0%, #def5e8 100%) !important;
+}
+
+.card-box-soft-gold {
+    background:
+        radial-gradient(circle at top right, rgba(216,169,40,0.26), transparent 34%),
+        linear-gradient(135deg, #ffffff 0%, #fff1b8 100%) !important;
+}
+
+.card-box-soft-mixed {
+    background:
+        radial-gradient(circle at top left, rgba(216,169,40,0.22), transparent 34%),
+        radial-gradient(circle at bottom right, rgba(15,107,79,0.18), transparent 36%),
+        linear-gradient(135deg, #ffffff 0%, #e7f7ef 100%) !important;
+}
+
+/* =========================
+   Extra Dashboard Colour Touch
+========================= */
+
+.member-hero {
+    box-shadow: 0 28px 70px rgba(7, 63, 47, 0.28) !important;
+}
+
+.saving-focus-card {
+    background:
+        radial-gradient(circle at top right, rgba(216,169,40,0.22), transparent 35%),
+        linear-gradient(135deg, #ffffff 0%, #eef7f1 100%) !important;
+    border: 1px solid rgba(255,255,255,0.85) !important;
+}
+
+.countdown-panel {
+    background:
+        radial-gradient(circle at top left, rgba(216,169,40,0.30), transparent 34%),
+        linear-gradient(135deg, #fff8df 0%, #dff5e9 100%) !important;
+}
+/* =========================
+   Mobile Collapsible Sidebar
+========================= */
+
+.mobile-menu-button {
+    display: none;
+}
+
+.sidebar-backdrop {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    body.sidebar-open {
+        overflow: hidden;
+    }
+
+    .mobile-menu-button {
+        position: fixed;
+        top: 14px;
+        left: 14px;
+        z-index: 1200;
+        width: 46px;
+        height: 46px;
+        border: 1px solid rgba(255,255,255,0.75);
+        border-radius: 16px;
+        background: linear-gradient(135deg, #0f6b4f, #073f2f);
+        box-shadow: 0 14px 30px rgba(16,36,31,0.22);
+        display: inline-flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 5px;
+        padding: 0;
+    }
+
+    .mobile-menu-button span {
+        width: 20px;
+        height: 2px;
+        border-radius: 999px;
+        background: #ffffff;
+        display: block;
+        transition: all 0.2s ease;
+    }
+
+    body.sidebar-open .mobile-menu-button span:nth-child(1) {
+        transform: translateY(7px) rotate(45deg);
+    }
+
+    body.sidebar-open .mobile-menu-button span:nth-child(2) {
+        opacity: 0;
+    }
+
+    body.sidebar-open .mobile-menu-button span:nth-child(3) {
+        transform: translateY(-7px) rotate(-45deg);
+    }
+
+    .sidebar-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(7, 63, 47, 0.45);
+        backdrop-filter: blur(3px);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+        z-index: 998;
+    }
+
+    body.sidebar-open .sidebar-backdrop {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .app-sidebar {
+        position: fixed !important;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 285px !important;
+        height: 100vh !important;
+        transform: translateX(-110%);
+        transition: transform 0.25s ease;
+        z-index: 1000;
+        border-radius: 0 28px 28px 0;
+        box-shadow: 22px 0 55px rgba(16,36,31,0.28);
+    }
+
+    body.sidebar-open .app-sidebar {
+        transform: translateX(0);
+    }
+
+    .app-main {
+        margin-left: 0 !important;
+    }
+
+    .app-topbar {
+        padding-left: 76px !important;
+        min-height: 74px;
+    }
+
+    .app-content {
+        padding: 18px !important;
+    }
+}
