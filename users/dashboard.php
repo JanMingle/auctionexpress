@@ -21,6 +21,22 @@ $member_code = $_SESSION["member_code"] ?? "";
 
 $displayName = $username ?: ($member_code ?: $name);
 
+$bankCheckStmt = $conn->prepare("
+    SELECT banking_details_completed
+    FROM users
+    WHERE id = ?
+    AND tenant_id = ?
+    LIMIT 1
+");
+$bankCheckStmt->bind_param("ii", $user_id, $tenant_id);
+$bankCheckStmt->execute();
+$bankCheck = $bankCheckStmt->get_result()->fetch_assoc();
+
+if (!$bankCheck || (int)($bankCheck["banking_details_completed"] ?? 0) !== 1) {
+    header("Location: banking_details.php");
+    exit;
+}
+
 $statsStmt = $conn->prepare("
     SELECT
         COUNT(*) AS total_requests,

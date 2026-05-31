@@ -107,7 +107,13 @@ $membersStmt = $conn->prepare("
         username, 
         member_code, 
         status, 
-        created_at
+        created_at,
+        bank_name,
+bank_account_holder,
+bank_account_number,
+bank_branch_code,
+bank_account_type,
+banking_details_completed
     FROM users
     WHERE tenant_id = ?
     AND role = 'member'
@@ -512,7 +518,29 @@ function memberStatusBadge($status) {
             justify-content: flex-end;
             flex-wrap: wrap;
         }
+.bank-details-panel {
+    display: none;
+    margin-top: 10px;
+    background: #fffdf7;
+    border: 1px dashed rgba(216,169,40,0.48);
+    border-radius: 16px;
+    padding: 12px;
+    font-size: 13px;
+    color: #4b3a12;
+    min-width: 240px;
+}
 
+.bank-details-panel.show {
+    display: block;
+}
+
+.bank-details-panel p {
+    margin-bottom: 5px;
+}
+
+.bank-details-panel p:last-child {
+    margin-bottom: 0;
+}
         @media (max-width: 900px) {
             .members-hero {
                 border-radius: 24px;
@@ -654,6 +682,7 @@ function memberStatusBadge($status) {
                                 <th>Login Code</th>
                                 <th>Email</th>
                                 <th>Phone</th>
+                                <th>Banking</th>
                                 <th>Status</th>
                                 <th>Registered</th>
                                 <th class="text-end">Action</th>
@@ -706,6 +735,27 @@ function memberStatusBadge($status) {
                                             <?php echo htmlspecialchars($member["phone"] ?: "-"); ?>
                                         </td>
 
+                                      <td>
+    <?php if ((int)($member["banking_details_completed"] ?? 0) === 1): ?>
+        <button 
+            type="button" 
+            class="btn btn-outline-dark btn-sm"
+            onclick="toggleBankDetails('bankDetails<?php echo (int)$member["id"]; ?>')"
+        >
+            View Bank
+        </button>
+
+        <div class="bank-details-panel" id="bankDetails<?php echo (int)$member["id"]; ?>">
+            <p><strong>Bank:</strong> <?php echo htmlspecialchars($member["bank_name"] ?: "-"); ?></p>
+            <p><strong>Account Holder:</strong> <?php echo htmlspecialchars($member["bank_account_holder"] ?: "-"); ?></p>
+            <p><strong>Account Number:</strong> <?php echo htmlspecialchars($member["bank_account_number"] ?: "-"); ?></p>
+            <p><strong>Branch Code:</strong> <?php echo htmlspecialchars($member["bank_branch_code"] ?: "-"); ?></p>
+            <p><strong>Account Type:</strong> <?php echo htmlspecialchars($member["bank_account_type"] ?: "-"); ?></p>
+        </div>
+    <?php else: ?>
+        <span class="badge badge-pending">Missing</span>
+    <?php endif; ?>
+</td>
                                         <td>
                                             <?php echo memberStatusBadge($member["status"]); ?>
                                         </td>
@@ -788,6 +838,35 @@ function copyInviteLink() {
     }).catch(function () {
         alert("Could not copy link. Please copy it manually.");
     });
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+function copyInviteLink() {
+    const text = document.getElementById("inviteLink").innerText.trim();
+
+    navigator.clipboard.writeText(text).then(function () {
+        alert("Member registration link copied.");
+    }).catch(function () {
+        alert("Could not copy link. Please copy it manually.");
+    });
+}
+
+function toggleBankDetails(panelId) {
+    const selectedPanel = document.getElementById(panelId);
+
+    if (!selectedPanel) {
+        return;
+    }
+
+    document.querySelectorAll(".bank-details-panel").forEach(function (panel) {
+        if (panel.id !== panelId) {
+            panel.classList.remove("show");
+        }
+    });
+
+    selectedPanel.classList.toggle("show");
 }
 </script>
 

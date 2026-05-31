@@ -23,9 +23,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 users.member_code,
                 users.password,
                 users.role,
-                users.status,
-                tenants.stokvel_name,
-                tenants.subscription_status
+               users.status,
+users.banking_details_completed,
+users.bank_name,
+users.bank_account_holder,
+users.bank_account_number,
+users.bank_branch_code,
+users.bank_account_type,
+tenants.stokvel_name,
+tenants.subscription_status
             FROM users
             INNER JOIN tenants ON tenants.id = users.tenant_id
             WHERE users.email = ?
@@ -58,13 +64,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $_SESSION["username"] = $user["username"];
                 $_SESSION["member_code"] = $user["member_code"];
 
-                if ($user["role"] === "owner" || $user["role"] === "admin") {
-                    header("Location: admin/dashboard.php");
-                    exit;
-                } else {
-                    header("Location: users/dashboard.php");
-                    exit;
-                }
+            if ($user["role"] === "owner" || $user["role"] === "admin") {
+    header("Location: admin/dashboard.php");
+    exit;
+} else {
+    $bankingComplete = (int)($user["banking_details_completed"] ?? 0) === 1;
+
+    if (!$bankingComplete) {
+        header("Location: users/banking_details.php");
+        exit;
+    }
+
+    header("Location: users/dashboard.php");
+    exit;
+}
             } else {
                 $error = "Incorrect login details.";
             }
