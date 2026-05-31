@@ -161,8 +161,8 @@ show_daily_returns = ?,
                         WHERE id = ?
                     ");
 
-         $stmt->bind_param(
-    "ssddddsdiidiiiiiisi",
+      $stmt->bind_param(
+    "ssddddsdiiiddiiiiiisi",
     $package_name,
     $description,
     $monthly_price,
@@ -193,35 +193,35 @@ show_daily_returns = ?,
                         $error = "Could not update package.";
                     }
                 } else {
-                    $stmt = $conn->prepare("
-                        INSERT INTO packages
-                        (
-                            package_name,
-                            description,
-                            monthly_price,
-                            minimum_saving_amount,
-                            admin_fee_amount,
-                           return_rate_percent,
-return_calculation_type,
-daily_return_percent,
-maturity_days,
-withdraw_after_days,
-show_daily_returns,
-                            recruitment_bonus_percent,
-                            bonus_claim_minimum,
-                            enable_referrals,
-                            enable_bonus_claims,
-                            enable_group_chat,
-                            enable_guest_chat,
-                            require_banking_details,
-                            require_proof_of_payment,
-                            status
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ");
+                   $stmt = $conn->prepare("
+    INSERT INTO packages
+    (
+        package_name,
+        description,
+        monthly_price,
+        minimum_saving_amount,
+        admin_fee_amount,
+        return_rate_percent,
+        return_calculation_type,
+        daily_return_percent,
+        maturity_days,
+        withdraw_after_days,
+        show_daily_returns,
+        recruitment_bonus_percent,
+        bonus_claim_minimum,
+        enable_referrals,
+        enable_bonus_claims,
+        enable_group_chat,
+        enable_guest_chat,
+        require_banking_details,
+        require_proof_of_payment,
+        status
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+");
 
-            $stmt->bind_param(
-    "ssddddsdiidiiiiiis",
+$stmt->bind_param(
+    "ssddddsdiiiddiiiiiis",
     $package_name,
     $description,
     $monthly_price,
@@ -591,7 +591,7 @@ $formPackage = [
             <nav class="owner-nav">
                 <a href="dashboard.php">Dashboard</a>
                 <a href="packages.php" class="active">Packages</a>
-                <a href="#">Tenants</a>
+               <a href="tenants.php">Tenants</a>
                 <a href="logout.php">Logout</a>
             </nav>
         </div>

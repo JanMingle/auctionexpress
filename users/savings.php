@@ -1,13 +1,14 @@
 <?php
 session_start();
 require_once "../config/db.php";
+require_once "../includes/package_rules.php";
 
 if (!isset($_SESSION["user_id"])) {
     header("Location: ../login.php");
     exit;
 }
 
-if ($_SESSION["role"] !== "member") {
+if ($_SESSION["role"] === "owner" || $_SESSION["role"] === "admin") {
     header("Location: ../admin/dashboard.php");
     exit;
 }
@@ -15,10 +16,31 @@ if ($_SESSION["role"] !== "member") {
 $user_id = (int)$_SESSION["user_id"];
 $tenant_id = (int)$_SESSION["tenant_id"];
 $name = $_SESSION["name"] ?? "Member";
+$username = $_SESSION["username"] ?? "";
+$member_code = $_SESSION["member_code"] ?? "";
+$stokvel_name = $_SESSION["stokvel_name"] ?? "Stokvel";
 
 $error = "";
 $success = "";
 
+/* ===============================
+   PACKAGE RULES
+   =============================== */
+$packageRules = getTenantPackageRules($conn, $tenant_id);
+
+$minimum_saving_amount = (float)$packageRules["minimum_saving_amount"];
+$admin_fee_amount = (float)$packageRules["admin_fee_amount"];
+$return_rate_percent = (float)$packageRules["return_rate_percent"];
+$daily_return_percent = (float)$packageRules["daily_return_percent"];
+$return_calculation_type = $packageRules["return_calculation_type"];
+$maturity_days = (int)$packageRules["maturity_days"];
+$withdraw_after_days = (int)$packageRules["withdraw_after_days"];
+$show_daily_returns = (int)$packageRules["show_daily_returns"];
+$require_proof_of_payment = (int)$packageRules["require_proof_of_payment"];
+
+/* ===============================
+   TENANT BANK SETTINGS
+   =============================== */
 $settingsInsert = $conn->prepare("
     INSERT IGNORE INTO stokvel_settings (tenant_id, return_rate_percent, maturity_days)
     VALUES (?, 10.00, 30)
@@ -28,8 +50,6 @@ $settingsInsert->execute();
 
 $settingsStmt = $conn->prepare("
     SELECT 
-        return_rate_percent,
-        maturity_days,
         bank_name,
         account_holder,
         account_number,
@@ -44,33 +64,53 @@ $settingsStmt->bind_param("i", $tenant_id);
 $settingsStmt->execute();
 $settings = $settingsStmt->get_result()->fetch_assoc();
 
-$return_rate_percent = (float)($settings["return_rate_percent"] ?? 10.00);
-$maturity_days = (int)($settings["maturity_days"] ?? 30);
-
-$minimum_saving_amount = 200.00;
-$admin_fee_amount = 20.00;
-
 $bank_name = $settings["bank_name"] ?? "";
 $account_holder = $settings["account_holder"] ?? "";
 $account_number = $settings["account_number"] ?? "";
 $branch_code = $settings["branch_code"] ?? "";
 $account_type = $settings["account_type"] ?? "";
 $payment_reference_note = $settings["payment_reference_note"] ?? "";
+
+/* ===============================
+   USER DETAILS
+   =============================== */
+$userStmt = $conn->prepare("
+    SELECT 
+        first_name,
+        last_name,
+        username,
+        member_code
+    FROM users
+    WHERE id = ?
+    AND tenant_id = ?
+    LIMIT 1
+");
+$userStmt->bind_param("ii", $user_id, $tenant_id);
+$userStmt->execute();
+$userData = $userStmt->get_result()->fetch_assoc();
+
+if ($userData) {
+    $username = $userData["username"] ?? $username;
+    $member_code = $userData["member_code"] ?? $member_code;
+}
+
+$displayName = $username ?: ($member_code ?: $name);
+
+/* ===============================
+   HELPERS
+   =============================== */
 function normalizeMoneyInput($value) {
     $value = trim((string)$value);
     $value = str_replace(" ", "", $value);
 
-    // If user types 2,000 or 2,000.50, remove thousands comma.
     if (strpos($value, ",") !== false && strpos($value, ".") !== false) {
         $value = str_replace(",", "", $value);
     } else {
-        // If user types 200,50 treat comma as decimal.
         $value = str_replace(",", ".", $value);
     }
 
     $value = preg_replace("/[^0-9.]/", "", $value);
 
-    // Keep only the first decimal point.
     $parts = explode(".", $value);
     if (count($parts) > 2) {
         $value = array_shift($parts) . "." . implode("", $parts);
@@ -79,54 +119,128 @@ function normalizeMoneyInput($value) {
     return $value;
 }
 
-function money($amount) {
-    return "R" . number_format((float)$amount, 2);
+function requestCode($member_code, $username, $request_id) {
+    $baseCode = $member_code ?: ($username ?: "MEMBER");
+    return $baseCode . "-SAV" . str_pad((int)$request_id, 5, "0", STR_PAD_LEFT);
 }
 
-function getOpenPaymentRequest($conn, $tenant_id, $user_id) {
+function statusBadge($status) {
+    if ($status === "pending" || $status === "pending_payment") {
+        return '<span class="badge badge-pending">Awaiting Payment</span>';
+    }
+
+    if ($status === "payment_submitted") {
+        return '<span class="badge badge-pending">Proof Submitted</span>';
+    }
+
+    if ($status === "approved") {
+        return '<span class="badge badge-approved">Approved</span>';
+    }
+
+    if ($status === "withdrawn") {
+        return '<span class="badge badge-approved">Withdrawn</span>';
+    }
+
+    if ($status === "rejected") {
+        return '<span class="badge badge-rejected">Rejected</span>';
+    }
+
+    return '<span class="badge bg-secondary">Unknown</span>';
+}
+
+function maturityText($row) {
+    if (($row["status"] ?? "") === "approved" && !empty($row["matures_at"])) {
+        $maturityTime = strtotime($row["matures_at"]);
+
+        if ($maturityTime <= time()) {
+            return "Matured";
+        }
+
+        return "Matures on " . date("d M Y H:i", $maturityTime);
+    }
+
+    if (($row["status"] ?? "") === "withdrawn") {
+        return "Closed";
+    }
+
+    if (($row["status"] ?? "") === "rejected") {
+        return "Rejected";
+    }
+
+    return "Not started yet";
+}
+
+/* ===============================
+   OPEN REQUEST
+   =============================== */
+function getOpenSavingRequest($conn, $tenant_id, $user_id) {
     $stmt = $conn->prepare("
-        SELECT id, amount, status, created_at
+        SELECT
+            id,
+            amount,
+            return_rate_percent,
+            maturity_days,
+            expected_return_amount,
+            expected_total_amount,
+            note,
+            proof_of_payment_path,
+            payment_note,
+            payment_submitted_at,
+            status,
+            created_at,
+            approved_at,
+            matures_at,
+            withdrawn_at
         FROM savings_requests
         WHERE tenant_id = ?
         AND user_id = ?
-        AND status IN ('pending', 'pending_payment', 'payment_submitted')
+        AND status IN ('pending', 'pending_payment', 'payment_submitted', 'approved')
         ORDER BY created_at DESC
         LIMIT 1
     ");
     $stmt->bind_param("ii", $tenant_id, $user_id);
     $stmt->execute();
-    $result = $stmt->get_result();
 
-    return $result ? $result->fetch_assoc() : null;
+    return $stmt->get_result()->fetch_assoc();
 }
 
-$openRequest = getOpenPaymentRequest($conn, $tenant_id, $user_id);
-$has_open_request = is_array($openRequest);
+$openRequest = getOpenSavingRequest($conn, $tenant_id, $user_id);
+$has_open_request = !empty($openRequest);
 
+/* ===============================
+   FORM ACTIONS
+   =============================== */
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $form_action = $_POST["form_action"] ?? "";
 
     if ($form_action === "create_saving") {
-      $amount = normalizeMoneyInput($_POST["amount"] ?? "");
+        $amount = normalizeMoneyInput($_POST["amount"] ?? "");
         $note = trim($_POST["note"] ?? "");
 
-      if ($has_open_request) {
-    $error = "You already have a saving request waiting for payment or admin approval.";
-} elseif ($amount === "") {
-    $error = "Please enter how much you want to save.";
-} elseif (!is_numeric($amount) || (float)$amount <= 0) {
-    $error = "Please enter a valid amount.";
-} elseif ((float)$amount < $minimum_saving_amount) {
-    $error = "Minimum saving amount is " . money($minimum_saving_amount) . ".";
-} else {
-    $amount = (float)$amount;
+        if ($has_open_request) {
+            $error = "You already have a saving request waiting for payment, admin approval, or withdrawal.";
+        } elseif ($amount === "") {
+            $error = "Please enter how much you want to save.";
+        } elseif (!is_numeric($amount) || (float)$amount <= 0) {
+            $error = "Please enter a valid amount.";
+        } elseif ((float)$amount < $minimum_saving_amount) {
+            $error = "Minimum saving amount is " . packageMoney($minimum_saving_amount) . ".";
+        } else {
+            $amount = (float)$amount;
+            $deposit_amount = $amount + $admin_fee_amount;
 
-    // Admin fee is only added to the deposit amount.
-    // It must not be included in return calculations.
-    $deposit_amount = $amount + $admin_fee_amount;
+            $returnPreview = calculatePackageReturn($amount, $packageRules, $maturity_days);
 
-    $expected_return_amount = ($amount * $return_rate_percent) / 100;
-    $expected_total_amount = $amount + $expected_return_amount;
+            $expected_return_amount = (float)$returnPreview["return_amount"];
+            $expected_total_amount = (float)$returnPreview["total_amount"];
+
+            $stored_return_percent = $return_calculation_type === "once_off"
+                ? $return_rate_percent
+                : $daily_return_percent;
+
+            $initial_status = $require_proof_of_payment === 1
+                ? "pending_payment"
+                : "payment_submitted";
 
             $stmt = $conn->prepare("
                 INSERT INTO savings_requests
@@ -139,36 +253,39 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     expected_return_amount,
                     expected_total_amount,
                     note,
-                    status
+                    status,
+                    created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
             ");
 
             $stmt->bind_param(
-                "iiddidds",
+                "iiddiddss",
                 $tenant_id,
                 $user_id,
                 $amount,
-                $return_rate_percent,
+                $stored_return_percent,
                 $maturity_days,
                 $expected_return_amount,
                 $expected_total_amount,
-                $note
+                $note,
+                $initial_status
             );
 
             if ($stmt->execute()) {
-               $success = "Your saving request has been created. Please deposit " . money($deposit_amount) . " including the " . money($admin_fee_amount) . " admin fee, then upload proof of payment.";
+                $newRequestId = $conn->insert_id;
+                $paymentRef = requestCode($member_code, $username, $newRequestId);
 
-                $openRequest = [
-                    "id" => $conn->insert_id,
-                    "amount" => $amount,
-                    "status" => "pending_payment",
-                    "created_at" => date("Y-m-d H:i:s")
-                ];
+                if ($require_proof_of_payment === 1) {
+                    $success = "Your saving request has been created. Please deposit " . packageMoney($deposit_amount) . " including the " . packageMoney($admin_fee_amount) . " admin fee, then upload proof of payment. Use reference: " . $paymentRef . ".";
+                } else {
+                    $success = "Your saving request has been created. Please deposit " . packageMoney($deposit_amount) . " including the " . packageMoney($admin_fee_amount) . " admin fee. Use reference: " . $paymentRef . ".";
+                }
 
-                $has_open_request = true;
+                $openRequest = getOpenSavingRequest($conn, $tenant_id, $user_id);
+                $has_open_request = !empty($openRequest);
             } else {
-                $error = "Could not submit your saving request. Please try again.";
+                $error = "Could not create saving request. Please try again.";
             }
         }
     }
@@ -179,9 +296,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         if ($savings_request_id <= 0) {
             $error = "Invalid saving request selected.";
+        } elseif (!isset($_FILES["proof_of_payment"]) || $_FILES["proof_of_payment"]["error"] !== UPLOAD_ERR_OK) {
+            $error = "Please select a valid proof of payment file.";
         } else {
             $checkStmt = $conn->prepare("
-                SELECT id, status
+                SELECT id
                 FROM savings_requests
                 WHERE id = ?
                 AND tenant_id = ?
@@ -191,39 +310,37 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             ");
             $checkStmt->bind_param("iii", $savings_request_id, $tenant_id, $user_id);
             $checkStmt->execute();
-            $saving = $checkStmt->get_result()->fetch_assoc();
+            $validRequest = $checkStmt->get_result()->fetch_assoc();
 
-            if (!$saving) {
-                $error = "This request cannot receive proof of payment anymore.";
-            } elseif (!isset($_FILES["proof_of_payment"]) || $_FILES["proof_of_payment"]["error"] !== UPLOAD_ERR_OK) {
-                $error = "Please upload a valid proof of payment file.";
+            if (!$validRequest) {
+                $error = "This saving request cannot accept proof of payment.";
             } else {
+                $file = $_FILES["proof_of_payment"];
+                $maxSize = 5 * 1024 * 1024;
                 $allowedExtensions = ["jpg", "jpeg", "png", "pdf", "webp"];
-                $originalName = $_FILES["proof_of_payment"]["name"];
-                $fileSize = (int)$_FILES["proof_of_payment"]["size"];
-                $tmpName = $_FILES["proof_of_payment"]["tmp_name"];
+
+                $originalName = $file["name"];
                 $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
 
-                if (!in_array($extension, $allowedExtensions, true)) {
-                    $error = "Only JPG, PNG, WEBP, or PDF files are allowed.";
-                } elseif ($fileSize > 5 * 1024 * 1024) {
-                    $error = "Proof of payment file must not be larger than 5MB.";
+                if ($file["size"] > $maxSize) {
+                    $error = "Proof of payment must not be larger than 5MB.";
+                } elseif (!in_array($extension, $allowedExtensions, true)) {
+                    $error = "Only JPG, PNG, WEBP, and PDF files are allowed.";
                 } else {
-                    $uploadDir = "../uploads/proofs/";
-                    $relativeDir = "uploads/proofs/";
+                    $uploadDir = __DIR__ . "/../uploads/proofs/tenant_" . $tenant_id . "/";
 
                     if (!is_dir($uploadDir)) {
                         mkdir($uploadDir, 0775, true);
                     }
 
-                    $safeFileName = "proof_" . $tenant_id . "_" . $user_id . "_" . $savings_request_id . "_" . time() . "_" . bin2hex(random_bytes(3)) . "." . $extension;
-                    $targetPath = $uploadDir . $safeFileName;
-                    $relativePath = $relativeDir . $safeFileName;
+                    $fileName = "proof_user_" . $user_id . "_request_" . $savings_request_id . "_" . time() . "." . $extension;
+                    $targetPath = $uploadDir . $fileName;
+                    $relativePath = "uploads/proofs/tenant_" . $tenant_id . "/" . $fileName;
 
-                    if (move_uploaded_file($tmpName, $targetPath)) {
+                    if (move_uploaded_file($file["tmp_name"], $targetPath)) {
                         $updateStmt = $conn->prepare("
                             UPDATE savings_requests
-                            SET 
+                            SET
                                 proof_of_payment_path = ?,
                                 payment_note = ?,
                                 payment_submitted_at = NOW(),
@@ -244,20 +361,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                         if ($updateStmt->execute()) {
                             $success = "Proof of payment uploaded successfully. Please wait for admin approval.";
-
-                            $openRequest = [
-                                "id" => $savings_request_id,
-                                "amount" => $openRequest["amount"] ?? 0,
-                                "status" => "payment_submitted",
-                                "created_at" => date("Y-m-d H:i:s")
-                            ];
-
-                            $has_open_request = true;
+                            $openRequest = getOpenSavingRequest($conn, $tenant_id, $user_id);
+                            $has_open_request = !empty($openRequest);
                         } else {
-                            $error = "Could not save proof of payment.";
+                            $error = "Proof uploaded, but the request could not be updated.";
                         }
                     } else {
-                        $error = "Could not upload the proof of payment file.";
+                        $error = "Could not upload proof of payment. Please try again.";
                     }
                 }
             }
@@ -265,11 +375,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 }
 
-$openRequest = getOpenPaymentRequest($conn, $tenant_id, $user_id);
-$has_open_request = is_array($openRequest);
-
-$historyStmt = $conn->prepare("
-    SELECT 
+/* ===============================
+   USER REQUEST HISTORY
+   =============================== */
+$requestsStmt = $conn->prepare("
+    SELECT
         id,
         amount,
         return_rate_percent,
@@ -290,95 +400,28 @@ $historyStmt = $conn->prepare("
     AND user_id = ?
     ORDER BY created_at DESC
 ");
-$historyStmt->bind_param("ii", $tenant_id, $user_id);
-$historyStmt->execute();
-$history = $historyStmt->get_result();
+$requestsStmt->bind_param("ii", $tenant_id, $user_id);
+$requestsStmt->execute();
+$requests = $requestsStmt->get_result();
 
-$totalStatsStmt = $conn->prepare("
-    SELECT
-        COUNT(*) AS total_requests,
+$liveReturn = null;
+$elapsedDays = 0;
+$canWithdrawNow = false;
 
-        SUM(CASE 
-            WHEN status = 'approved' 
-            THEN expected_total_amount 
-            ELSE 0 
-        END) AS approved_expected_total,
-
-        SUM(CASE 
-            WHEN status = 'approved' 
-            THEN expected_return_amount 
-            ELSE 0 
-        END) AS approved_expected_returns,
-
-        SUM(CASE 
-            WHEN status = 'approved' 
-            AND matures_at <= NOW() 
-            THEN expected_total_amount 
-            ELSE 0 
-        END) AS matured_total,
-
-        SUM(CASE 
-            WHEN status = 'withdrawn' 
-            THEN expected_total_amount 
-            ELSE 0 
-        END) AS withdrawn_total
-
-    FROM savings_requests
-    WHERE tenant_id = ?
-    AND user_id = ?
-");
-$totalStatsStmt->bind_param("ii", $tenant_id, $user_id);
-$totalStatsStmt->execute();
-$totalStats = $totalStatsStmt->get_result()->fetch_assoc();
-
-$total_requests = (int)($totalStats["total_requests"] ?? 0);
-$approved_expected_total = (float)($totalStats["approved_expected_total"] ?? 0);
-$approved_expected_returns = (float)($totalStats["approved_expected_returns"] ?? 0);
-$matured_total = (float)($totalStats["matured_total"] ?? 0);
-$withdrawn_total = (float)($totalStats["withdrawn_total"] ?? 0);
-
-$activeApprovedStmt = $conn->prepare("
-    SELECT amount, expected_return_amount, expected_total_amount, matures_at
-    FROM savings_requests
-    WHERE tenant_id = ?
-    AND user_id = ?
-    AND status = 'approved'
-    AND matures_at IS NOT NULL
-    AND matures_at > NOW()
-    ORDER BY matures_at ASC
-    LIMIT 1
-");
-$activeApprovedStmt->bind_param("ii", $tenant_id, $user_id);
-$activeApprovedStmt->execute();
-$activeApproved = $activeApprovedStmt->get_result()->fetch_assoc();
-
-function requestBadge($status, $maturesAt = null) {
-    if ($status === "pending" || $status === "pending_payment") {
-        return '<span class="badge badge-pending">Awaiting Payment</span>';
-    }
-
-    if ($status === "payment_submitted") {
-        return '<span class="badge badge-pending">Proof Submitted</span>';
-    }
-
-    if ($status === "rejected") {
-        return '<span class="badge badge-rejected">Rejected</span>';
-    }
-
-    if ($status === "withdrawn") {
-        return '<span class="badge badge-approved">Withdrawn</span>';
-    }
-
-    if ($status === "approved") {
-        if (!empty($maturesAt) && strtotime($maturesAt) <= time()) {
-            return '<span class="badge badge-approved">Matured</span>';
-        }
-
-        return '<span class="badge badge-pending">Maturing</span>';
-    }
-
-    return '<span class="badge bg-secondary">Unknown</span>';
+if ($has_open_request && ($openRequest["status"] ?? "") === "approved" && $show_daily_returns === 1) {
+    $elapsedDays = approvedElapsedDays($openRequest["approved_at"] ?? null);
+    $liveReturn = calculatePackageReturn((float)$openRequest["amount"], $packageRules, $elapsedDays);
+    $canWithdrawNow = canWithdrawByPackage($openRequest["approved_at"] ?? null, $packageRules);
 }
+
+$currentPaymentReference = "";
+if ($has_open_request) {
+    $currentPaymentReference = requestCode($member_code, $username, (int)$openRequest["id"]);
+}
+
+$currentDepositAmount = $has_open_request
+    ? ((float)$openRequest["amount"] + $admin_fee_amount)
+    : 0.00;
 ?>
 
 <!DOCTYPE html>
@@ -396,15 +439,60 @@ function requestBadge($status, $maturesAt = null) {
     <link rel="stylesheet" href="../assets/css/app.css?v=<?php echo time(); ?>">
 
     <style>
+        body {
+            background:
+                radial-gradient(circle at 8% 10%, rgba(216, 169, 40, 0.34), transparent 30%),
+                radial-gradient(circle at 90% 20%, rgba(15, 107, 79, 0.28), transparent 32%),
+                radial-gradient(circle at 50% 90%, rgba(216, 169, 40, 0.20), transparent 34%),
+                linear-gradient(135deg, #fff4c7 0%, #fbf7ed 32%, #e7f7ef 72%, #dff5e9 100%) !important;
+            background-attachment: fixed;
+        }
+
+        .app-main {
+            background:
+                radial-gradient(circle at 20% 15%, rgba(216,169,40,0.13), transparent 30%),
+                radial-gradient(circle at 88% 30%, rgba(15,107,79,0.10), transparent 34%);
+        }
+
+        .app-content {
+            position: relative;
+        }
+
+        .app-content::before {
+            content: "R";
+            position: fixed;
+            right: 40px;
+            bottom: 34px;
+            width: 170px;
+            height: 170px;
+            border-radius: 50%;
+            background: linear-gradient(145deg, rgba(248,216,106,0.45), rgba(216,169,40,0.24));
+            color: rgba(74,53,4,0.18);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 82px;
+            font-weight: 900;
+            transform: rotate(-14deg);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .app-content > * {
+            position: relative;
+            z-index: 1;
+        }
+
         .savings-hero {
             background:
-                radial-gradient(circle at top right, rgba(216,169,40,0.24), transparent 34%),
+                radial-gradient(circle at top right, rgba(216,169,40,0.34), transparent 34%),
+                radial-gradient(circle at bottom left, rgba(255,255,255,0.12), transparent 32%),
                 linear-gradient(135deg, #0f6b4f, #073f2f);
             color: #ffffff;
-            border-radius: 30px;
-            padding: 28px;
+            border-radius: 32px;
+            padding: 30px;
             margin-bottom: 24px;
-            box-shadow: 0 28px 70px rgba(7, 63, 47, 0.28);
+            box-shadow: 0 30px 80px rgba(7, 63, 47, 0.32);
             position: relative;
             overflow: hidden;
         }
@@ -414,17 +502,17 @@ function requestBadge($status, $maturesAt = null) {
             position: absolute;
             right: 34px;
             top: 24px;
-            width: 92px;
-            height: 92px;
+            width: 96px;
+            height: 96px;
             border-radius: 50%;
             background: linear-gradient(145deg, #f8d86a, #d8a928);
             color: #4a3504;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 38px;
+            font-size: 42px;
             font-weight: 900;
-            opacity: 0.22;
+            opacity: 0.25;
             transform: rotate(-12deg);
         }
 
@@ -432,28 +520,20 @@ function requestBadge($status, $maturesAt = null) {
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            background: rgba(255,255,255,0.10);
-            border: 1px solid rgba(255,255,255,0.14);
-            color: rgba(255,255,255,0.84);
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.18);
+            color: rgba(255,255,255,0.86);
             border-radius: 999px;
             padding: 8px 12px;
             font-size: 12px;
-            font-weight: 800;
+            font-weight: 900;
             margin-bottom: 16px;
             position: relative;
             z-index: 2;
         }
 
-        .savings-kicker::before {
-            content: "";
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #d8a928;
-        }
-
-        .savings-hero-title {
-            font-size: 32px;
+        .savings-title {
+            font-size: 34px;
             line-height: 1.05;
             font-weight: 900;
             letter-spacing: -0.05em;
@@ -462,110 +542,130 @@ function requestBadge($status, $maturesAt = null) {
             z-index: 2;
         }
 
-        .savings-hero-text {
-            color: rgba(255,255,255,0.76);
+        .savings-text {
+            color: rgba(255,255,255,0.78);
             font-size: 14px;
             line-height: 1.6;
-            max-width: 680px;
+            max-width: 760px;
             margin-bottom: 0;
             position: relative;
             z-index: 2;
         }
 
-        .countdown-box {
+        .savings-card {
             background:
-                radial-gradient(circle at top right, rgba(216,169,40,0.26), transparent 35%),
-                linear-gradient(135deg, #0f6b4f, #073f2f);
-            color: white;
-            border-radius: 28px;
-            padding: 24px;
-            box-shadow: 0 24px 60px rgba(7,63,47,0.24);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .countdown-box::after {
-            content: "";
-            position: absolute;
-            right: -45px;
-            bottom: -45px;
-            width: 140px;
-            height: 140px;
-            border-radius: 50%;
-            background: rgba(216,169,40,0.18);
-        }
-
-        .countdown-time {
-            font-size: 28px;
-            font-weight: 900;
-            letter-spacing: -0.04em;
-            position: relative;
-            z-index: 2;
-        }
-
-        .countdown-label {
-            font-size: 13px;
-            color: rgba(255,255,255,0.72);
-            position: relative;
-            z-index: 2;
-        }
-
-        .bank-box {
-            background:
-                radial-gradient(circle at top right, rgba(216,169,40,0.18), transparent 34%),
-                linear-gradient(135deg, #fffdf7 0%, #eef7f1 100%);
-            border: 1px dashed rgba(216,169,40,0.48);
-            border-radius: 22px;
-            padding: 18px;
-        }
-
-        .saving-form-card {
-            background:
-                radial-gradient(circle at top right, rgba(15,107,79,0.14), transparent 35%),
+                radial-gradient(circle at top right, rgba(15,107,79,0.18), transparent 35%),
                 linear-gradient(135deg, #ffffff 0%, #def5e8 100%) !important;
+            border: 1px solid rgba(255,255,255,0.88) !important;
+            box-shadow: 0 22px 55px rgba(16,36,31,0.14) !important;
         }
 
-        .bank-card {
-            background:
-                radial-gradient(circle at top right, rgba(216,169,40,0.22), transparent 35%),
-                linear-gradient(135deg, #ffffff 0%, #fff1b8 100%) !important;
-        }
-
+        .bank-card,
+        .proof-upload-card,
         .history-card {
             background:
-                radial-gradient(circle at top left, rgba(216,169,40,0.18), transparent 32%),
-                radial-gradient(circle at bottom right, rgba(15,107,79,0.16), transparent 34%),
-                linear-gradient(135deg, #ffffff 0%, #e7f7ef 100%) !important;
+                radial-gradient(circle at top right, rgba(216,169,40,0.30), transparent 34%),
+                linear-gradient(135deg, #ffffff 0%, #fff1b8 100%) !important;
+            border: 1px solid rgba(255,255,255,0.88) !important;
+            box-shadow: 0 22px 55px rgba(16,36,31,0.14) !important;
         }
 
-        .savings-section-title {
+        .live-return-box {
+            background:
+                radial-gradient(circle at top right, rgba(15,107,79,0.18), transparent 35%),
+                linear-gradient(135deg, #ffffff 0%, #d8f5e5 100%) !important;
+            border: 1px solid rgba(255,255,255,0.88) !important;
+            box-shadow: 0 22px 55px rgba(16,36,31,0.14) !important;
+        }
+
+        .live-return-label {
+            font-size: 13px;
+            color: #667085;
+            font-weight: 800;
+        }
+
+        .live-return-value {
+            font-size: 34px;
+            font-weight: 900;
+            color: #073f2f;
+            letter-spacing: -0.05em;
+            margin-bottom: 8px;
+        }
+
+        .section-title {
             font-size: 18px;
             font-weight: 900;
             letter-spacing: -0.03em;
             color: #10241f;
+            margin-bottom: 6px;
         }
 
-        .proof-upload-card {
-    background:
-        radial-gradient(circle at top right, rgba(216,169,40,0.24), transparent 35%),
-        linear-gradient(135deg, #ffffff 0%, #fff1b8 100%) !important;
-}
+        .section-subtitle {
+            font-size: 13px;
+            color: #667085;
+            margin-bottom: 18px;
+        }
 
-.proof-upload-box {
-    background: #fffdf7;
-    border: 1px dashed rgba(216,169,40,0.48);
-    border-radius: 22px;
-    padding: 18px;
-}
+        .bank-box,
+        .proof-upload-box,
+        .reference-box {
+            background: #fffdf7;
+            border: 1px dashed rgba(216,169,40,0.48);
+            border-radius: 20px;
+            padding: 16px;
+            color: #4b3a12;
+            font-size: 14px;
+        }
 
-.proof-upload-box input[type="file"] {
-    min-height: 48px;
-    font-size: 15px;
-}
+        .reference-code {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #fff8df;
+            border: 1px solid rgba(216,169,40,0.35);
+            color: #7a5a09;
+            border-radius: 999px;
+            padding: 7px 12px;
+            font-size: 13px;
+            font-weight: 900;
+            word-break: break-word;
+        }
 
-.proof-upload-box textarea {
-    font-size: 16px;
-}
+        .rule-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .rule-item {
+            background: rgba(255,255,255,0.74);
+            border: 1px solid rgba(16,36,31,0.08);
+            border-radius: 16px;
+            padding: 12px;
+            font-size: 13px;
+        }
+
+        .rule-label {
+            color: #667085;
+            margin-bottom: 3px;
+        }
+
+        .rule-value {
+            font-weight: 900;
+            color: #073f2f;
+        }
+
+        .proof-upload-box input[type="file"] {
+            min-height: 48px;
+            font-size: 15px;
+        }
+
+        .proof-upload-box textarea,
+        input,
+        textarea {
+            font-size: 16px;
+        }
 
         @media (max-width: 900px) {
             .savings-hero {
@@ -573,7 +673,7 @@ function requestBadge($status, $maturesAt = null) {
                 padding: 24px;
             }
 
-            .savings-hero-title {
+            .savings-title {
                 font-size: 27px;
             }
 
@@ -583,6 +683,10 @@ function requestBadge($status, $maturesAt = null) {
                 font-size: 30px;
                 right: 20px;
                 top: 20px;
+            }
+
+            .rule-grid {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -598,7 +702,7 @@ function requestBadge($status, $maturesAt = null) {
             <div>
                 <div class="app-topbar-title">My Savings</div>
                 <div class="app-topbar-subtitle">
-                    Submit saving request, deposit money, and upload proof of payment.
+                    Submit savings, upload proof, and track your returns.
                 </div>
             </div>
         </div>
@@ -607,20 +711,18 @@ function requestBadge($status, $maturesAt = null) {
 
             <div class="savings-hero">
                 <div class="savings-kicker">
-                    My Savings Circle
+                    <?php echo htmlspecialchars($stokvel_name); ?>
                 </div>
 
-                <div class="savings-hero-title">
-                    Save, upload proof, and watch your money grow
+                <div class="savings-title">
+                    Save and track your growth
                 </div>
 
-                <p class="savings-hero-text">
-                    Hello, <strong><?php echo htmlspecialchars($name); ?></strong>. 
-                    Your current stokvel rule is 
-                    <strong><?php echo number_format($return_rate_percent, 2); ?>%</strong>
-                    return after 
-                    <strong><?php echo $maturity_days; ?> days</strong>
-                    from admin approval.
+                <p class="savings-text">
+                    Hello, <strong><?php echo htmlspecialchars($displayName); ?></strong>.
+                    Your stokvel is currently using the 
+                    <strong><?php echo htmlspecialchars($packageRules["package_name"]); ?></strong>
+                    package. Your saving rules are calculated from that package.
                 </p>
             </div>
 
@@ -636,217 +738,289 @@ function requestBadge($status, $maturesAt = null) {
                 </div>
             <?php endif; ?>
 
-            <?php if ($activeApproved): ?>
-                <div class="countdown-box mb-4">
-                    <div class="row align-items-center g-3">
-                        <div class="col-md-7">
-                            <div class="countdown-label">Your next approved saving matures in</div>
-                            <div 
-                                class="countdown-time js-countdown" 
-                                data-target="<?php echo htmlspecialchars(date("c", strtotime($activeApproved["matures_at"]))); ?>"
-                            >
-                                Calculating...
-                            </div>
-                            <div class="countdown-label mt-1">
-                                Maturity date: <?php echo date("d M Y H:i", strtotime($activeApproved["matures_at"])); ?>
-                            </div>
-                        </div>
-
-                        <div class="col-md-5">
-                            <div class="countdown-label">Expected return</div>
-                            <div class="countdown-time">
-                                R<?php echo number_format((float)$activeApproved["expected_return_amount"], 2); ?>
-                            </div>
-                            <div class="countdown-label mt-1">
-                                Expected total: R<?php echo number_format((float)$activeApproved["expected_total_amount"], 2); ?>
-                            </div>
-                        </div>
+            <?php if ($has_open_request && ($openRequest["status"] ?? "") === "approved" && $show_daily_returns === 1 && $liveReturn): ?>
+                <div class="card-box live-return-box mb-4">
+                    <div class="live-return-label">
+                        <?php echo htmlspecialchars(packageReturnLabel($packageRules)); ?>
                     </div>
+
+                    <div class="live-return-value">
+                        <?php echo packageMoney($liveReturn["total_amount"]); ?>
+                    </div>
+
+                    <p class="text-muted mb-2">
+                        You have earned an extra 
+                        <strong><?php echo packageMoney($liveReturn["return_amount"]); ?></strong>
+                        after 
+                        <strong><?php echo (int)$elapsedDays; ?></strong>
+                        completed day<?php echo $elapsedDays === 1 ? "" : "s"; ?>.
+                    </p>
+
+                    <p class="text-muted mb-0">
+                        Maturity period: <?php echo (int)$maturity_days; ?> days · 
+                        Withdrawal allowed after: <?php echo (int)$withdraw_after_days; ?> days.
+                    </p>
+
+                    <?php if ($canWithdrawNow): ?>
+                        <div class="alert alert-success mt-3 mb-0">
+                            You are now allowed to request a withdrawal.
+                            <a href="withdrawals.php" class="alert-link">Go to withdrawals</a>.
+                        </div>
+                    <?php else: ?>
+                        <div class="alert alert-warning mt-3 mb-0">
+                            Withdrawal is not available yet.
+                        </div>
+                    <?php endif; ?>
                 </div>
             <?php endif; ?>
-
-            <?php if ($has_open_request): ?>
-                <div class="alert alert-warning">
-                    You have a saving request of 
-                    <strong>R<?php echo number_format((float)($openRequest["amount"] ?? 0), 2); ?></strong>
-                    currently marked as 
-                    <strong><?php echo htmlspecialchars(str_replace("_", " ", $openRequest["status"] ?? "")); ?></strong>.
-                    You can submit another request after admin approves or rejects this one.
-                </div>
-            <?php endif; ?>
-
-            <div class="row g-3 mb-4">
-                <div class="col-md-3">
-                    <div class="stat-card stat-card-green">
-                        <div class="stat-label">Total Requests</div>
-                        <div class="stat-value"><?php echo $total_requests; ?></div>
-                    </div>
-                </div>
-
-                <div class="col-md-3">
-                    <div class="stat-card stat-card-gold">
-                        <div class="stat-label">Approved Returns</div>
-                        <div class="stat-value">
-                            R<?php echo number_format($approved_expected_returns, 2); ?>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-md-3">
-                    <div class="stat-card stat-card-blue">
-                        <div class="stat-label">Matured / Ready</div>
-                        <div class="stat-value">
-                            R<?php echo number_format($matured_total, 2); ?>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-md-3">
-                    <div class="stat-card stat-card-red">
-                        <div class="stat-label">Withdrawn</div>
-                        <div class="stat-value">
-                            R<?php echo number_format($withdrawn_total, 2); ?>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
             <div class="row g-4">
-                <div class="col-lg-5">
-                    <div class="card-box saving-form-card mb-4">
-                        <h5 class="savings-section-title mb-3">Submit Saving Amount</h5>
+                <div class="col-lg-7">
+                    <div class="card-box savings-card mb-4">
+                        <div class="section-title">Submit Saving Request</div>
+                        <p class="section-subtitle">
+                            Enter the amount you want to save. The admin fee is added to the amount you deposit,
+                            but it is not included in your return calculation.
+                        </p>
 
-                        <form method="POST" action="">
+                        <?php if ($has_open_request): ?>
+                            <div class="alert alert-warning">
+                                You already have an open saving request. You can submit another request after this cycle is rejected or withdrawn.
+                            </div>
+                        <?php endif; ?>
+
+                        <form method="POST">
                             <input type="hidden" name="form_action" value="create_saving">
 
                             <div class="mb-3">
-                                <label class="form-label">Amount You Want to Save *</label>
- <input 
-    type="text" 
-    name="amount" 
-    id="amountInput"
-    class="form-control" 
-    inputmode="decimal"
-    pattern="^[0-9]+([.,][0-9]{1,2})?$"
-    placeholder="Minimum R200"
-    <?php echo $has_open_request ? "disabled" : ""; ?>
-    required
->
-                            </div>
-                            <div class="mt-3" id="depositPreview" style="display:none;">
-    <div class="alert alert-info mb-0">
-        <div><strong>Saving amount:</strong> <span id="savingAmountText">R0.00</span></div>
-        <div><strong>Admin fee:</strong> <span id="adminFeeText">R20.00</span></div>
-        <div><strong>Total to deposit:</strong> <span id="depositAmountText">R0.00</span></div>
-        <hr>
-        <div><strong>Expected return:</strong> <span id="returnAmountText">R0.00</span></div>
-        <div><strong>Expected payout:</strong> <span id="payoutAmountText">R0.00</span></div>
-        <small class="text-muted">
-            The admin fee is not included when calculating your return.
-        </small>
-    </div>
-</div>
+                                <label class="form-label">Saving Amount *</label>
+                                <input 
+                                    type="text" 
+                                    name="amount" 
+                                    id="amountInput"
+                                    class="form-control" 
+                                    inputmode="decimal"
+                                    pattern="^[0-9]+([.,][0-9]{1,2})?$"
+                                    placeholder="Minimum <?php echo packageMoney($minimum_saving_amount); ?>"
+                                    <?php echo $has_open_request ? "disabled" : ""; ?>
+                                    required
+                                >
 
-                            <div class="live-return-box mb-3">
-                                <div class="row g-3">
-                                    <div class="col-6">
-                                        <div class="live-return-label">Estimated Return</div>
-                                        <div class="live-return-value" id="returnAmount">R0.00</div>
+                                <div class="mt-3" id="depositPreview" style="display:none;">
+                                    <div class="alert alert-info mb-0">
+                                        <div><strong>Saving amount:</strong> <span id="savingAmountText">R0.00</span></div>
+                                        <div><strong>Admin fee:</strong> <span id="adminFeeText">R0.00</span></div>
+                                        <div><strong>Total to deposit:</strong> <span id="depositAmountText">R0.00</span></div>
+                                        <hr>
+                                        <div><strong>Return type:</strong> <span id="returnTypeText">Once-off return</span></div>
+                                        <div><strong>Expected return:</strong> <span id="returnAmountText">R0.00</span></div>
+                                        <div><strong>Expected payout:</strong> <span id="payoutAmountText">R0.00</span></div>
+                                        <small class="text-muted">
+                                            The admin fee is not included when calculating your return.
+                                        </small>
                                     </div>
-
-                                    <div class="col-6">
-                                        <div class="live-return-label">Estimated Total</div>
-                                        <div class="live-return-value" id="totalAmount">R0.00</div>
-                                    </div>
-                                </div>
-
-                                <div class="text-muted mt-2" style="font-size: 12px;">
-                                    Return starts only after admin confirms your proof of payment.
                                 </div>
                             </div>
 
-                            <div class="mb-3">
+                            <div class="mb-4">
                                 <label class="form-label">Note</label>
                                 <textarea 
-                                    name="note" 
-                                    class="form-control" 
-                                    rows="4"
-                                    placeholder="Optional note for the admin"
+                                    name="note"
+                                    class="form-control"
+                                    rows="3"
+                                    placeholder="Optional note"
                                     <?php echo $has_open_request ? "disabled" : ""; ?>
                                 ></textarea>
                             </div>
 
                             <button 
                                 type="submit" 
-                                class="btn btn-dark w-100"
+                                class="btn btn-dark"
                                 <?php echo $has_open_request ? "disabled" : ""; ?>
                             >
-                                <?php echo $has_open_request ? "Waiting for Current Request" : "Submit Saving Request"; ?>
+                                Submit Saving Request
                             </button>
                         </form>
                     </div>
 
-                   <?php if ($has_open_request): ?>
-    <div class="card-box bank-card">
-        <h5 class="savings-section-title mb-3">Bank Details</h5>
+                    <div class="card-box history-card">
+                        <div class="section-title">My Saving Requests</div>
+                        <p class="section-subtitle">
+                            View your saving history and request statuses.
+                        </p>
 
-        <div class="bank-box">
-            <div class="alert alert-info mb-3">
-                Deposit only after submitting your saving request.
-                Your proof of payment must match the required deposit amount.
-            </div>
+                        <div class="table-responsive">
+                            <table class="table align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Reference</th>
+                                        <th>Amount</th>
+                                        <th>Return</th>
+                                        <th>Total</th>
+                                        <th>Status</th>
+                                        <th>Maturity</th>
+                                    </tr>
+                                </thead>
 
-            <p class="mb-1">
-                <strong>Bank:</strong> 
-                <?php echo htmlspecialchars($bank_name ?: "-"); ?>
-            </p>
+                                <tbody>
+                                    <?php if ($requests->num_rows > 0): ?>
+                                        <?php while ($row = $requests->fetch_assoc()): ?>
+                                            <tr>
+                                                <td>
+                                                    <span class="reference-code">
+                                                        <?php echo htmlspecialchars(requestCode($member_code, $username, $row["id"])); ?>
+                                                    </span>
+                                                </td>
 
-            <p class="mb-1">
-                <strong>Account Holder:</strong> 
-                <?php echo htmlspecialchars($account_holder ?: "-"); ?>
-            </p>
+                                                <td>
+                                                    <?php echo packageMoney($row["amount"]); ?>
+                                                </td>
 
-            <p class="mb-1">
-                <strong>Account Number:</strong> 
-                <?php echo htmlspecialchars($account_number ?: "-"); ?>
-            </p>
+                                                <td>
+                                                    <?php echo packageMoney($row["expected_return_amount"]); ?>
+                                                    <div class="text-muted" style="font-size: 12px;">
+                                                        <?php echo number_format((float)$row["return_rate_percent"], 2); ?>%
+                                                    </div>
+                                                </td>
 
-            <p class="mb-1">
-                <strong>Branch Code:</strong> 
-                <?php echo htmlspecialchars($branch_code ?: "-"); ?>
-            </p>
+                                                <td>
+                                                    <strong><?php echo packageMoney($row["expected_total_amount"]); ?></strong>
+                                                </td>
 
-            <p class="mb-1">
-                <strong>Account Type:</strong> 
-                <?php echo htmlspecialchars($account_type ?: "-"); ?>
-            </p>
+                                                <td>
+                                                    <?php echo statusBadge($row["status"]); ?>
+                                                </td>
 
-            <hr>
-
-            <p class="text-muted mb-0">
-                <?php echo nl2br(htmlspecialchars($payment_reference_note ?: "Use your full name as payment reference.")); ?>
-            </p>
-        </div>
-    </div>
-<?php endif; ?>
+                                                <td>
+                                                    <span style="font-size: 13px;">
+                                                        <?php echo htmlspecialchars(maturityText($row)); ?>
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        <?php endwhile; ?>
+                                    <?php else: ?>
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted py-4">
+                                                No saving requests yet.
+                                            </td>
+                                        </tr>
+                                    <?php endif; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
-                                    <?php if ($has_open_request && in_array(($openRequest["status"] ?? ""), ["pending", "pending_payment"], true)): ?>
-                        <div class="card-box proof-upload-card mt-4" id="proofUploadCard">
-                            <h5 class="savings-section-title mb-3">Upload Proof of Payment</h5>
+                <div class="col-lg-5">
+                    <div class="card-box bank-card mb-4">
+                        <div class="section-title">Package Rules</div>
+                        <p class="section-subtitle">
+                            These rules come from your tenant’s assigned package.
+                        </p>
+
+                        <div class="rule-grid">
+                            <div class="rule-item">
+                                <div class="rule-label">Minimum Saving</div>
+                                <div class="rule-value"><?php echo packageMoney($minimum_saving_amount); ?></div>
+                            </div>
+
+                            <div class="rule-item">
+                                <div class="rule-label">Admin Fee</div>
+                                <div class="rule-value"><?php echo packageMoney($admin_fee_amount); ?></div>
+                            </div>
+
+                            <div class="rule-item">
+                                <div class="rule-label">Return Type</div>
+                                <div class="rule-value"><?php echo htmlspecialchars(packageReturnLabel($packageRules)); ?></div>
+                            </div>
+
+                            <div class="rule-item">
+                                <div class="rule-label">Maturity Days</div>
+                                <div class="rule-value"><?php echo (int)$maturity_days; ?> days</div>
+                            </div>
+
+                            <div class="rule-item">
+                                <div class="rule-label">Withdraw After</div>
+                                <div class="rule-value"><?php echo (int)$withdraw_after_days; ?> days</div>
+                            </div>
+
+                            <div class="rule-item">
+                                <div class="rule-label">Rate</div>
+                                <div class="rule-value">
+                                    <?php if ($return_calculation_type === "once_off"): ?>
+                                        <?php echo number_format($return_rate_percent, 2); ?>%
+                                    <?php else: ?>
+                                        <?php echo number_format($daily_return_percent, 2); ?>% daily
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <?php if ($has_open_request): ?>
+                        <div class="card-box bank-card mb-4">
+                            <div class="section-title">Deposit Details</div>
+                            <p class="section-subtitle">
+                                Use these details only after submitting a saving request.
+                            </p>
+
+                            <div class="reference-box mb-3">
+                                <div class="mb-2">
+                                    <strong>Payment Reference:</strong>
+                                </div>
+
+                                <span class="reference-code">
+                                    <?php echo htmlspecialchars($currentPaymentReference); ?>
+                                </span>
+
+                                <hr>
+
+                                <p class="mb-1">
+                                    <strong>Saving amount:</strong> <?php echo packageMoney((float)$openRequest["amount"]); ?>
+                                </p>
+
+                                <p class="mb-1">
+                                    <strong>Admin fee:</strong> <?php echo packageMoney($admin_fee_amount); ?>
+                                </p>
+
+                                <p class="mb-0">
+                                    <strong>Total deposit:</strong> <?php echo packageMoney($currentDepositAmount); ?>
+                                </p>
+                            </div>
+
+                            <div class="bank-box">
+                                <p class="mb-1"><strong>Bank:</strong> <?php echo htmlspecialchars($bank_name ?: "-"); ?></p>
+                                <p class="mb-1"><strong>Account Holder:</strong> <?php echo htmlspecialchars($account_holder ?: "-"); ?></p>
+                                <p class="mb-1"><strong>Account Number:</strong> <?php echo htmlspecialchars($account_number ?: "-"); ?></p>
+                                <p class="mb-1"><strong>Branch Code:</strong> <?php echo htmlspecialchars($branch_code ?: "-"); ?></p>
+                                <p class="mb-1"><strong>Account Type:</strong> <?php echo htmlspecialchars($account_type ?: "-"); ?></p>
+
+                                <hr>
+
+                                <p class="text-muted mb-0">
+                                    <?php echo nl2br(htmlspecialchars($payment_reference_note ?: "Use your payment reference when depositing.")); ?>
+                                </p>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+
+                    <?php if ($has_open_request && $require_proof_of_payment === 1 && in_array(($openRequest["status"] ?? ""), ["pending", "pending_payment"], true)): ?>
+                        <div class="card-box proof-upload-card" id="proofUploadCard">
+                            <div class="section-title">Upload Proof of Payment</div>
+                            <p class="section-subtitle">
+                                Upload proof after depositing the required amount.
+                            </p>
 
                             <div class="proof-upload-box">
                                 <div class="alert alert-info">
-                                    Upload proof for your saving request of 
-                                  <div class="alert alert-info">
-    Upload proof for your total deposit of 
-    <strong><?php echo money(((float)($openRequest["amount"] ?? 0)) + $admin_fee_amount); ?></strong>.
-    <br>
-    <small>
-        Saving amount: <?php echo money((float)($openRequest["amount"] ?? 0)); ?> ·
-        Admin fee: <?php echo money($admin_fee_amount); ?>
-    </small>
-</div>
+                                    Upload proof for your total deposit of 
+                                    <strong><?php echo packageMoney($currentDepositAmount); ?></strong>.
+                                    <br>
+                                    <small>
+                                        Saving amount: <?php echo packageMoney((float)($openRequest["amount"] ?? 0)); ?> ·
+                                        Admin fee: <?php echo packageMoney($admin_fee_amount); ?> ·
+                                        Ref: <?php echo htmlspecialchars($currentPaymentReference); ?>
+                                    </small>
                                 </div>
 
                                 <form method="POST" enctype="multipart/form-data">
@@ -885,140 +1059,14 @@ function requestBadge($status, $maturesAt = null) {
                         </div>
                     <?php endif; ?>
 
-                <div class="col-lg-7">
-                    <div class="card-box history-card">
-                        <h5 class="savings-section-title mb-3">My Previous Requests</h5>
-
-                        <div class="table-responsive">
-                            <table class="table align-middle">
-                                <thead>
-                                    <tr>
-                                        <th>Amount</th>
-                                        <th>Return</th>
-                                        <th>Total</th>
-                                        <th>Proof</th>
-                                        <th>Maturity</th>
-                                        <th>Status</th>
-                                        <th>Created</th>
-                                        <th class="text-end">Action</th>
-                                    </tr>
-                                </thead>
-
-                                <tbody>
-                                    <?php if ($history->num_rows > 0): ?>
-                                        <?php while ($row = $history->fetch_assoc()): ?>
-                                            <tr>
-                                                <td>
-                                                    <strong>
-                                                        R<?php echo number_format((float)$row["amount"], 2); ?>
-                                                    </strong>
-                                                </td>
-
-                                                <td>
-                                                    R<?php echo number_format((float)$row["expected_return_amount"], 2); ?>
-                                                    <div class="text-muted" style="font-size: 12px;">
-                                                        <?php echo number_format((float)$row["return_rate_percent"], 2); ?>%
-                                                    </div>
-                                                </td>
-
-                                                <td>
-                                                    <strong>
-                                                        R<?php echo number_format((float)$row["expected_total_amount"], 2); ?>
-                                                    </strong>
-                                                </td>
-
-                                                <td>
-                                                    <?php if (!empty($row["proof_of_payment_path"])): ?>
-                                                        <a 
-                                                            href="../<?php echo htmlspecialchars($row["proof_of_payment_path"]); ?>" 
-                                                            target="_blank"
-                                                            class="btn btn-outline-dark btn-sm"
-                                                        >
-                                                            View Proof
-                                                        </a>
-                                                    <?php else: ?>
-                                                        <span class="text-muted">Not uploaded</span>
-                                                    <?php endif; ?>
-                                                </td>
-
-                                                <td>
-                                                    <?php if ($row["status"] === "withdrawn"): ?>
-                                                        <strong>Closed</strong>
-                                                        <div class="text-muted" style="font-size: 12px;">
-                                                            Paid out / withdrawn
-                                                        </div>
-
-                                                    <?php elseif ($row["status"] === "approved" && !empty($row["matures_at"])): ?>
-                                                        <?php if (strtotime($row["matures_at"]) > time()): ?>
-                                                            <div 
-                                                                class="js-countdown" 
-                                                                data-target="<?php echo htmlspecialchars(date("c", strtotime($row["matures_at"]))); ?>"
-                                                                style="font-weight: 700;"
-                                                            >
-                                                                Calculating...
-                                                            </div>
-                                                        <?php else: ?>
-                                                            <strong>Ready</strong>
-                                                        <?php endif; ?>
-
-                                                        <div class="text-muted" style="font-size: 12px;">
-                                                            <?php echo date("d M Y H:i", strtotime($row["matures_at"])); ?>
-                                                        </div>
-
-                                                    <?php elseif ($row["status"] === "payment_submitted"): ?>
-                                                        <span class="text-muted">Waiting for admin approval</span>
-
-                                                    <?php elseif ($row["status"] === "pending" || $row["status"] === "pending_payment"): ?>
-                                                        <span class="text-muted">Upload proof first</span>
-
-                                                    <?php else: ?>
-                                                        <span class="text-muted">-</span>
-                                                    <?php endif; ?>
-                                                </td>
-
-                                                <td>
-                                                    <?php echo requestBadge($row["status"], $row["matures_at"]); ?>
-                                                </td>
-
-                                                <td>
-                                                    <?php echo date("d M Y H:i", strtotime($row["created_at"])); ?>
-                                                </td>
-
-                                                <td class="text-end">
-                                                <?php if ($row["status"] === "pending" || $row["status"] === "pending_payment"): ?>
-    <a href="#proofUploadCard" class="btn btn-dark btn-sm">
-        Upload Proof
-    </a>
-
-                                                    <?php elseif ($row["status"] === "approved" && !empty($row["matures_at"]) && strtotime($row["matures_at"]) <= time()): ?>
-                                                        <a href="withdrawals.php?saving_id=<?php echo (int)$row["id"]; ?>" class="btn btn-dark btn-sm">
-                                                            Request Withdrawal
-                                                        </a>
-
-                                                    <?php elseif ($row["status"] === "withdrawn"): ?>
-                                                        <span class="badge badge-approved">Closed</span>
-
-                                                    <?php else: ?>
-                                                        <span class="text-muted" style="font-size: 13px;">-</span>
-                                                    <?php endif; ?>
-                                                </td>
-                                            </tr>
-
-                                          
-                                        <?php endwhile; ?>
-                                    <?php else: ?>
-                                        <tr>
-                                            <td colspan="8" class="text-center text-muted py-4">
-                                                You have not submitted any saving request yet.
-                                            </td>
-                                        </tr>
-                                    <?php endif; ?>
-                                </tbody>
-
-                            </table>
+                    <?php if (!$has_open_request): ?>
+                        <div class="card-box bank-card">
+                            <div class="section-title">Deposit Details Locked</div>
+                            <p class="text-muted mb-0">
+                                Submit a saving request first. The stokvel banking details and payment reference will appear after your request is created.
+                            </p>
                         </div>
-
-                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -1027,68 +1075,15 @@ function requestBadge($status, $maturesAt = null) {
 
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-
-<script>
-const returnRate = <?php echo json_encode($return_rate_percent); ?>;
-const amountInput = document.getElementById("amountInput");
-const returnAmount = document.getElementById("returnAmount");
-const totalAmount = document.getElementById("totalAmount");
-
-function formatMoney(value) {
-    return "R" + Number(value || 0).toLocaleString("en-ZA", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    });
-}
-
-function calculateReturns() {
-    if (!amountInput) return;
-
-    const amount = parseFloat(amountInput.value) || 0;
-    const returns = (amount * returnRate) / 100;
-    const total = amount + returns;
-
-    returnAmount.textContent = formatMoney(returns);
-    totalAmount.textContent = formatMoney(total);
-}
-
-if (amountInput) {
-    amountInput.addEventListener("input", calculateReturns);
-    calculateReturns();
-}
-
-function updateCountdowns() {
-    const countdowns = document.querySelectorAll(".js-countdown");
-
-    countdowns.forEach(function (item) {
-        const target = new Date(item.dataset.target).getTime();
-        const now = new Date().getTime();
-        const distance = target - now;
-
-        if (distance <= 0) {
-            item.textContent = "Ready to withdraw";
-            return;
-        }
-
-        const days = Math.floor(distance / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((distance % (1000 * 60)) / 1000);
-
-        item.textContent = days + "d " + hours + "h " + minutes + "m " + seconds + "s";
-    });
-}
-
-updateCountdowns();
-setInterval(updateCountdowns, 1000);
-</script>
 <script>
 const amountInput = document.getElementById("amountInput");
 
 const minimumSavingAmount = <?php echo json_encode($minimum_saving_amount); ?>;
 const adminFeeAmount = <?php echo json_encode($admin_fee_amount); ?>;
 const returnRatePercent = <?php echo json_encode($return_rate_percent); ?>;
+const dailyReturnPercent = <?php echo json_encode($daily_return_percent); ?>;
+const returnCalculationType = <?php echo json_encode($return_calculation_type); ?>;
+const maturityDays = <?php echo json_encode($maturity_days); ?>;
 
 const depositPreview = document.getElementById("depositPreview");
 const savingAmountText = document.getElementById("savingAmountText");
@@ -1096,6 +1091,7 @@ const adminFeeText = document.getElementById("adminFeeText");
 const depositAmountText = document.getElementById("depositAmountText");
 const returnAmountText = document.getElementById("returnAmountText");
 const payoutAmountText = document.getElementById("payoutAmountText");
+const returnTypeTextElement = document.getElementById("returnTypeText");
 
 function formatMoney(amount) {
     return "R" + Number(amount || 0).toLocaleString("en-ZA", {
@@ -1129,8 +1125,26 @@ function updateDepositPreview() {
     }
 
     const depositAmount = amount + adminFeeAmount;
-    const expectedReturn = (amount * returnRatePercent) / 100;
-    const expectedPayout = amount + expectedReturn;
+
+    let expectedReturn = 0;
+    let expectedPayout = amount;
+
+    if (returnCalculationType === "daily_simple") {
+        expectedReturn = ((amount * dailyReturnPercent) / 100) * maturityDays;
+        expectedPayout = amount + expectedReturn;
+    } else if (returnCalculationType === "daily_compound") {
+        expectedPayout = amount * Math.pow((1 + (dailyReturnPercent / 100)), maturityDays);
+        expectedReturn = expectedPayout - amount;
+    } else {
+        expectedReturn = (amount * returnRatePercent) / 100;
+        expectedPayout = amount + expectedReturn;
+    }
+
+    const returnTypeText = returnCalculationType === "daily_simple"
+        ? "Daily simple return"
+        : returnCalculationType === "daily_compound"
+            ? "Daily compound return"
+            : "Once-off return";
 
     depositPreview.style.display = "block";
 
@@ -1139,6 +1153,10 @@ function updateDepositPreview() {
     depositAmountText.textContent = formatMoney(depositAmount);
     returnAmountText.textContent = formatMoney(expectedReturn);
     payoutAmountText.textContent = formatMoney(expectedPayout);
+
+    if (returnTypeTextElement) {
+        returnTypeTextElement.textContent = returnTypeText;
+    }
 
     if (amount < minimumSavingAmount) {
         depositPreview.classList.add("border", "border-danger");
@@ -1152,5 +1170,6 @@ if (amountInput) {
     updateDepositPreview();
 }
 </script>
+
 </body>
 </html>

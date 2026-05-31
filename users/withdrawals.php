@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once "../config/db.php";
+require_once "../includes/package_rules.php";
 
 if (!isset($_SESSION["user_id"])) {
     header("Location: ../login.php");
@@ -22,166 +23,19 @@ $displayName = $username ?: ($member_code ?: $name);
 $success = "";
 $error = "";
 
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
-    $savings_request_id = (int)($_POST["savings_request_id"] ?? 0);
-    $member_note = trim($_POST["member_note"] ?? "");
+/* ===============================
+   INTERNAL RULES
+   These come from the tenant package but are not shown as "package" to members.
+   =============================== */
+$rules = getTenantPackageRules($conn, $tenant_id);
 
-    if ($savings_request_id <= 0) {
-        $error = "Invalid saving selected.";
-    } else {
-        $checkStmt = $conn->prepare("
-            SELECT 
-                id,
-                amount,
-                expected_return_amount,
-                expected_total_amount,
-                status,
-                matures_at
-            FROM savings_requests
-            WHERE id = ?
-            AND tenant_id = ?
-            AND user_id = ?
-            AND status = 'approved'
-            AND matures_at IS NOT NULL
-            AND matures_at <= NOW()
-            LIMIT 1
-        ");
-        $checkStmt->bind_param("iii", $savings_request_id, $tenant_id, $user_id);
-        $checkStmt->execute();
-        $saving = $checkStmt->get_result()->fetch_assoc();
+$maturity_days = (int)($rules["maturity_days"] ?? 30);
+$withdraw_after_days = (int)($rules["withdraw_after_days"] ?? $maturity_days);
+$return_calculation_type = $rules["return_calculation_type"] ?? "once_off";
 
-        if (!$saving) {
-            $error = "This saving is not ready for withdrawal yet.";
-        } else {
-            $duplicateStmt = $conn->prepare("
-                SELECT id, status
-                FROM withdrawal_requests
-                WHERE tenant_id = ?
-                AND user_id = ?
-                AND savings_request_id = ?
-                AND status IN ('pending', 'approved', 'paid')
-                LIMIT 1
-            ");
-            $duplicateStmt->bind_param("iii", $tenant_id, $user_id, $savings_request_id);
-            $duplicateStmt->execute();
-            $existingWithdrawal = $duplicateStmt->get_result()->fetch_assoc();
-
-            if ($existingWithdrawal) {
-                $error = "A withdrawal request already exists for this saving.";
-            } else {
-                $amount_saved = (float)$saving["amount"];
-                $return_amount = (float)$saving["expected_return_amount"];
-                $withdrawal_amount = (float)$saving["expected_total_amount"];
-
-                $insertStmt = $conn->prepare("
-                    INSERT INTO withdrawal_requests
-                    (
-                        tenant_id,
-                        user_id,
-                        savings_request_id,
-                        amount_saved,
-                        return_amount,
-                        withdrawal_amount,
-                        member_note,
-                        status
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
-                ");
-
-                $insertStmt->bind_param(
-                    "iiiddds",
-                    $tenant_id,
-                    $user_id,
-                    $savings_request_id,
-                    $amount_saved,
-                    $return_amount,
-                    $withdrawal_amount,
-                    $member_note
-                );
-
-                if ($insertStmt->execute()) {
-                    $success = "Your withdrawal request has been submitted successfully.";
-                } else {
-                    $error = "Could not submit your withdrawal request. Please try again.";
-                }
-            }
-        }
-    }
-}
-
-$eligibleStmt = $conn->prepare("
-    SELECT 
-        sr.id,
-        sr.amount,
-        sr.expected_return_amount,
-        sr.expected_total_amount,
-        sr.created_at,
-        sr.approved_at,
-        sr.matures_at
-    FROM savings_requests sr
-    WHERE sr.tenant_id = ?
-    AND sr.user_id = ?
-    AND sr.status = 'approved'
-    AND sr.matures_at IS NOT NULL
-    AND sr.matures_at <= NOW()
-    AND NOT EXISTS (
-        SELECT 1
-        FROM withdrawal_requests wr
-        WHERE wr.savings_request_id = sr.id
-        AND wr.tenant_id = sr.tenant_id
-        AND wr.user_id = sr.user_id
-        AND wr.status IN ('pending', 'approved', 'paid')
-    )
-    ORDER BY sr.matures_at DESC
-");
-$eligibleStmt->bind_param("ii", $tenant_id, $user_id);
-$eligibleStmt->execute();
-$eligibleSavings = $eligibleStmt->get_result();
-
-$historyStmt = $conn->prepare("
-    SELECT 
-        wr.id,
-        wr.amount_saved,
-        wr.return_amount,
-        wr.withdrawal_amount,
-        wr.status,
-        wr.member_note,
-        wr.admin_note,
-        wr.requested_at,
-        wr.processed_at,
-        wr.paid_at,
-        sr.matures_at
-    FROM withdrawal_requests wr
-    INNER JOIN savings_requests sr ON sr.id = wr.savings_request_id
-    WHERE wr.tenant_id = ?
-    AND wr.user_id = ?
-    ORDER BY wr.requested_at DESC
-");
-$historyStmt->bind_param("ii", $tenant_id, $user_id);
-$historyStmt->execute();
-$withdrawalHistory = $historyStmt->get_result();
-
-$statsStmt = $conn->prepare("
-    SELECT
-        COUNT(*) AS total_withdrawals,
-        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_withdrawals,
-        SUM(CASE WHEN status = 'approved' THEN withdrawal_amount ELSE 0 END) AS approved_amount,
-        SUM(CASE WHEN status = 'paid' THEN withdrawal_amount ELSE 0 END) AS paid_amount
-    FROM withdrawal_requests
-    WHERE tenant_id = ?
-    AND user_id = ?
-");
-$statsStmt->bind_param("ii", $tenant_id, $user_id);
-$statsStmt->execute();
-$stats = $statsStmt->get_result()->fetch_assoc();
-
-$total_withdrawals = (int)($stats["total_withdrawals"] ?? 0);
-$pending_withdrawals = (int)($stats["pending_withdrawals"] ?? 0);
-$approved_amount = (float)($stats["approved_amount"] ?? 0);
-$paid_amount = (float)($stats["paid_amount"] ?? 0);
-
-$preselectedSavingId = (int)($_GET["saving_id"] ?? 0);
-
+/* ===============================
+   HELPERS
+   =============================== */
 function withdrawalBadge($status) {
     if ($status === "pending") {
         return '<span class="badge badge-pending">Pending</span>';
@@ -202,9 +56,325 @@ function withdrawalBadge($status) {
     return '<span class="badge bg-secondary">Unknown</span>';
 }
 
+function savingBadge($status) {
+    if ($status === "approved") {
+        return '<span class="badge badge-approved">Approved</span>';
+    }
+
+    if ($status === "withdrawn") {
+        return '<span class="badge badge-approved">Withdrawal Requested</span>';
+    }
+
+    if ($status === "payment_submitted") {
+        return '<span class="badge badge-pending">Proof Submitted</span>';
+    }
+
+    if ($status === "pending" || $status === "pending_payment") {
+        return '<span class="badge badge-pending">Awaiting Payment</span>';
+    }
+
+    if ($status === "rejected") {
+        return '<span class="badge badge-rejected">Rejected</span>';
+    }
+
+    return '<span class="badge bg-secondary">Unknown</span>';
+}
+
 function money($amount) {
     return "R" . number_format((float)$amount, 2);
 }
+
+function requestCode($member_code, $username, $request_id) {
+    $baseCode = $member_code ?: ($username ?: "MEMBER");
+    return $baseCode . "-SAV" . str_pad((int)$request_id, 5, "0", STR_PAD_LEFT);
+}
+
+function withdrawalRemainingDays($approved_at, $withdraw_after_days) {
+    $elapsedDays = approvedElapsedDays($approved_at);
+    $remaining = (int)$withdraw_after_days - (int)$elapsedDays;
+
+    return max(0, $remaining);
+}
+
+function calculateCurrentWithdrawalAmount($saving, $rules) {
+    $amount = (float)($saving["amount"] ?? 0);
+    $type = $rules["return_calculation_type"] ?? "once_off";
+
+    if ($type === "daily_simple" || $type === "daily_compound") {
+        $elapsedDays = approvedElapsedDays($saving["approved_at"] ?? null);
+        $liveReturn = calculatePackageReturn($amount, $rules, $elapsedDays);
+
+        return [
+            "amount_saved" => $amount,
+            "return_amount" => (float)$liveReturn["return_amount"],
+            "withdrawal_amount" => (float)$liveReturn["total_amount"],
+            "days_used" => (int)$liveReturn["days_used"]
+        ];
+    }
+
+    return [
+        "amount_saved" => $amount,
+        "return_amount" => (float)($saving["expected_return_amount"] ?? 0),
+        "withdrawal_amount" => (float)($saving["expected_total_amount"] ?? 0),
+        "days_used" => (int)($rules["maturity_days"] ?? 0)
+    ];
+}
+
+/* ===============================
+   FORM ACTION
+   =============================== */
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $savings_request_id = (int)($_POST["savings_request_id"] ?? 0);
+    $member_note = trim($_POST["member_note"] ?? "");
+
+    if ($savings_request_id <= 0) {
+        $error = "Invalid saving selected.";
+    } else {
+        $checkStmt = $conn->prepare("
+            SELECT 
+                id,
+                amount,
+                expected_return_amount,
+                expected_total_amount,
+                status,
+                approved_at,
+                matures_at
+            FROM savings_requests
+            WHERE id = ?
+            AND tenant_id = ?
+            AND user_id = ?
+            AND status = 'approved'
+            AND approved_at IS NOT NULL
+            LIMIT 1
+        ");
+        $checkStmt->bind_param("iii", $savings_request_id, $tenant_id, $user_id);
+        $checkStmt->execute();
+        $saving = $checkStmt->get_result()->fetch_assoc();
+
+        if (!$saving) {
+            $error = "This saving is not ready for withdrawal yet.";
+        } elseif (!canWithdrawByPackage($saving["approved_at"] ?? null, $rules)) {
+            $remaining = withdrawalRemainingDays($saving["approved_at"] ?? null, $withdraw_after_days);
+            $error = "This saving is not ready for withdrawal yet. Please wait " . $remaining . " more day" . ($remaining === 1 ? "" : "s") . ".";
+        } else {
+            $duplicateStmt = $conn->prepare("
+                SELECT id, status
+                FROM withdrawal_requests
+                WHERE tenant_id = ?
+                AND user_id = ?
+                AND savings_request_id = ?
+                AND status IN ('pending', 'approved', 'paid')
+                LIMIT 1
+            ");
+            $duplicateStmt->bind_param("iii", $tenant_id, $user_id, $savings_request_id);
+            $duplicateStmt->execute();
+            $existingWithdrawal = $duplicateStmt->get_result()->fetch_assoc();
+
+            if ($existingWithdrawal) {
+                $error = "A withdrawal request already exists for this saving.";
+            } else {
+                $withdrawalData = calculateCurrentWithdrawalAmount($saving, $rules);
+
+                $amount_saved = (float)$withdrawalData["amount_saved"];
+                $return_amount = (float)$withdrawalData["return_amount"];
+                $withdrawal_amount = (float)$withdrawalData["withdrawal_amount"];
+
+                if ($withdrawal_amount <= 0) {
+                    $error = "Could not calculate withdrawal amount.";
+                } else {
+                    $conn->begin_transaction();
+
+                    try {
+                        $insertStmt = $conn->prepare("
+                            INSERT INTO withdrawal_requests
+                            (
+                                tenant_id,
+                                user_id,
+                                savings_request_id,
+                                amount_saved,
+                                return_amount,
+                                withdrawal_amount,
+                                member_note,
+                                status
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+                        ");
+
+                        $insertStmt->bind_param(
+                            "iiiddds",
+                            $tenant_id,
+                            $user_id,
+                            $savings_request_id,
+                            $amount_saved,
+                            $return_amount,
+                            $withdrawal_amount,
+                            $member_note
+                        );
+
+                        if (!$insertStmt->execute()) {
+                            throw new Exception("Could not submit your withdrawal request. Please try again.");
+                        }
+
+                        $updateStmt = $conn->prepare("
+                            UPDATE savings_requests
+                            SET 
+                                status = 'withdrawn',
+                                withdrawn_at = NOW()
+                            WHERE id = ?
+                            AND tenant_id = ?
+                            AND user_id = ?
+                        ");
+                        $updateStmt->bind_param("iii", $savings_request_id, $tenant_id, $user_id);
+
+                        if (!$updateStmt->execute()) {
+                            throw new Exception("Withdrawal request was created, but saving cycle could not be closed.");
+                        }
+
+                        $conn->commit();
+
+                        $success = "Your withdrawal request has been submitted successfully.";
+                    } catch (Exception $e) {
+                        $conn->rollback();
+                        $error = $e->getMessage();
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* ===============================
+   SAVINGS AVAILABLE OR WAITING
+   =============================== */
+$eligibleStmt = $conn->prepare("
+    SELECT 
+        sr.id,
+        sr.amount,
+        sr.expected_return_amount,
+        sr.expected_total_amount,
+        sr.created_at,
+        sr.approved_at,
+        sr.matures_at
+    FROM savings_requests sr
+    WHERE sr.tenant_id = ?
+    AND sr.user_id = ?
+    AND sr.status = 'approved'
+    AND sr.approved_at IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1
+        FROM withdrawal_requests wr
+        WHERE wr.savings_request_id = sr.id
+        AND wr.tenant_id = sr.tenant_id
+        AND wr.user_id = sr.user_id
+        AND wr.status IN ('pending', 'approved', 'paid')
+    )
+    ORDER BY sr.approved_at ASC, sr.created_at ASC
+");
+$eligibleStmt->bind_param("ii", $tenant_id, $user_id);
+$eligibleStmt->execute();
+$eligibleSavings = $eligibleStmt->get_result();
+
+$eligibleRows = [];
+$totalReadyAmount = 0;
+$readyCount = 0;
+$waitingCount = 0;
+
+while ($saving = $eligibleSavings->fetch_assoc()) {
+    $withdrawalData = calculateCurrentWithdrawalAmount($saving, $rules);
+    $canWithdraw = canWithdrawByPackage($saving["approved_at"] ?? null, $rules);
+    $remainingDays = withdrawalRemainingDays($saving["approved_at"] ?? null, $withdraw_after_days);
+    $elapsedDays = approvedElapsedDays($saving["approved_at"] ?? null);
+
+    if ($canWithdraw) {
+        $readyCount++;
+        $totalReadyAmount += (float)$withdrawalData["withdrawal_amount"];
+    } else {
+        $waitingCount++;
+    }
+
+    $eligibleRows[] = [
+        "saving" => $saving,
+        "withdrawalData" => $withdrawalData,
+        "canWithdraw" => $canWithdraw,
+        "remainingDays" => $remainingDays,
+        "elapsedDays" => $elapsedDays
+    ];
+}
+
+/* ===============================
+   WITHDRAWAL HISTORY
+   =============================== */
+$historyStmt = $conn->prepare("
+    SELECT 
+        wr.id,
+        wr.savings_request_id,
+        wr.amount_saved,
+        wr.return_amount,
+        wr.withdrawal_amount,
+        wr.status,
+        wr.member_note,
+        wr.admin_note,
+        wr.requested_at,
+        wr.processed_at,
+        wr.paid_at,
+        sr.matures_at,
+        sr.approved_at AS saving_approved_at
+    FROM withdrawal_requests wr
+    INNER JOIN savings_requests sr ON sr.id = wr.savings_request_id
+    WHERE wr.tenant_id = ?
+    AND wr.user_id = ?
+    ORDER BY wr.requested_at DESC
+");
+$historyStmt->bind_param("ii", $tenant_id, $user_id);
+$historyStmt->execute();
+$withdrawalHistory = $historyStmt->get_result();
+
+/* ===============================
+   STATS
+   =============================== */
+$statsStmt = $conn->prepare("
+    SELECT
+        COUNT(*) AS total_withdrawals,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_withdrawals,
+        SUM(CASE WHEN status = 'approved' THEN withdrawal_amount ELSE 0 END) AS approved_amount,
+        SUM(CASE WHEN status = 'paid' THEN withdrawal_amount ELSE 0 END) AS paid_amount
+    FROM withdrawal_requests
+    WHERE tenant_id = ?
+    AND user_id = ?
+");
+$statsStmt->bind_param("ii", $tenant_id, $user_id);
+$statsStmt->execute();
+$stats = $statsStmt->get_result()->fetch_assoc();
+
+$total_withdrawals = (int)($stats["total_withdrawals"] ?? 0);
+$pending_withdrawals = (int)($stats["pending_withdrawals"] ?? 0);
+$approved_amount = (float)($stats["approved_amount"] ?? 0);
+$paid_amount = (float)($stats["paid_amount"] ?? 0);
+
+/* ===============================
+   SAVING CYCLE HISTORY
+   =============================== */
+$savingsHistoryStmt = $conn->prepare("
+    SELECT
+        id,
+        amount,
+        expected_return_amount,
+        expected_total_amount,
+        status,
+        created_at,
+        approved_at,
+        matures_at,
+        withdrawn_at
+    FROM savings_requests
+    WHERE tenant_id = ?
+    AND user_id = ?
+    ORDER BY created_at DESC
+");
+$savingsHistoryStmt->bind_param("ii", $tenant_id, $user_id);
+$savingsHistoryStmt->execute();
+$savingsHistory = $savingsHistoryStmt->get_result();
+
+$preselectedSavingId = (int)($_GET["saving_id"] ?? 0);
 ?>
 
 <!DOCTYPE html>
@@ -488,9 +658,24 @@ function money($amount) {
             background: #0f6b4f;
         }
 
-        .modal-content {
-            border: 0;
-            box-shadow: 0 30px 90px rgba(16,36,31,0.25);
+        .reference-code {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #fff8df;
+            border: 1px solid rgba(216,169,40,0.35);
+            color: #7a5a09;
+            border-radius: 999px;
+            padding: 7px 12px;
+            font-size: 13px;
+            font-weight: 900;
+            word-break: break-word;
+        }
+
+        .waiting-note {
+            font-size: 12px;
+            color: #667085;
+            margin-top: 4px;
         }
 
         @media (max-width: 900px) {
@@ -524,7 +709,7 @@ function money($amount) {
             <div>
                 <div class="app-topbar-title">My Withdrawals</div>
                 <div class="app-topbar-subtitle">
-                    Request withdrawal only after your saving has matured.
+                    Request withdrawal when your saving is ready.
                 </div>
             </div>
         </div>
@@ -542,8 +727,8 @@ function money($amount) {
 
                 <p class="withdrawals-hero-text">
                     Hello, <strong><?php echo htmlspecialchars($displayName); ?></strong>. 
-                    Matured savings will appear here when they are ready to withdraw.
-                    Submit a request and your stokvel admin will approve or process the payout.
+                    Savings will appear here when they are ready to withdraw.
+                    Submit a request and your stokvel admin will process the payout.
                 </p>
             </div>
 
@@ -598,7 +783,7 @@ function money($amount) {
                     <div>
                         <div class="section-title">Ready for Withdrawal</div>
                         <div class="section-subtitle">
-                            These are matured savings that do not already have a withdrawal request.
+                            Approved savings will appear here. If a saving is still in the waiting period, it will show as not ready yet.
                         </div>
                     </div>
 
@@ -611,101 +796,97 @@ function money($amount) {
                     <table class="table align-middle">
                         <thead>
                             <tr>
+                                <th>Reference</th>
                                 <th>Saved</th>
                                 <th>Return</th>
                                 <th>Total Withdrawal</th>
-                                <th>Matured On</th>
+                                <th>Approved On</th>
+                                <th>Status</th>
                                 <th class="text-end">Action</th>
                             </tr>
                         </thead>
 
                         <tbody>
-                            <?php if ($eligibleSavings->num_rows > 0): ?>
-                                <?php while ($saving = $eligibleSavings->fetch_assoc()): ?>
+                            <?php if (count($eligibleRows) > 0): ?>
+                                <?php foreach ($eligibleRows as $item): ?>
+                                    <?php
+                                        $saving = $item["saving"];
+                                        $withdrawalData = $item["withdrawalData"];
+                                        $canWithdraw = $item["canWithdraw"];
+                                        $remainingDays = $item["remainingDays"];
+                                        $elapsedDays = $item["elapsedDays"];
+                                        $refCode = requestCode($member_code, $username, $saving["id"]);
+                                    ?>
+
                                     <tr>
                                         <td>
-                                            <strong><?php echo money($saving["amount"]); ?></strong>
+                                            <span class="reference-code">
+                                                <?php echo htmlspecialchars($refCode); ?>
+                                            </span>
                                         </td>
 
                                         <td>
-                                            <?php echo money($saving["expected_return_amount"]); ?>
+                                            <strong><?php echo money($withdrawalData["amount_saved"]); ?></strong>
                                         </td>
 
                                         <td>
-                                            <strong><?php echo money($saving["expected_total_amount"]); ?></strong>
+                                            <?php echo money($withdrawalData["return_amount"]); ?>
+                                            <div class="waiting-note">
+                                                <?php echo (int)$elapsedDays; ?> day<?php echo $elapsedDays === 1 ? "" : "s"; ?> completed
+                                            </div>
                                         </td>
 
                                         <td>
-                                            <?php echo date("d M Y H:i", strtotime($saving["matures_at"])); ?>
+                                            <strong><?php echo money($withdrawalData["withdrawal_amount"]); ?></strong>
+                                        </td>
+
+                                        <td>
+                                            <?php echo !empty($saving["approved_at"]) ? date("d M Y H:i", strtotime($saving["approved_at"])) : "-"; ?>
+                                        </td>
+
+                                        <td>
+                                            <?php if ($canWithdraw): ?>
+                                                <span class="badge badge-approved">Ready</span>
+                                            <?php else: ?>
+                                                <span class="badge badge-pending">Waiting</span>
+                                                <div class="waiting-note">
+                                                    <?php echo (int)$remainingDays; ?> day<?php echo $remainingDays === 1 ? "" : "s"; ?> left
+                                                </div>
+                                            <?php endif; ?>
                                         </td>
 
                                         <td class="text-end">
-                                            <button 
-                                                type="button"
-                                                class="btn btn-dark btn-sm"
-                                                data-bs-toggle="modal"
-                                                data-bs-target="#withdrawModal<?php echo (int)$saving["id"]; ?>"
-                                            >
-                                                Request Withdrawal
-                                            </button>
+                                            <?php if ($canWithdraw): ?>
+                                                <form method="POST" class="d-inline">
+                                                    <input type="hidden" name="savings_request_id" value="<?php echo (int)$saving["id"]; ?>">
 
-                                            <div 
-                                                class="modal fade" 
-                                                id="withdrawModal<?php echo (int)$saving["id"]; ?>" 
-                                                tabindex="-1"
-                                                aria-hidden="true"
-                                            >
-                                                <div class="modal-dialog modal-dialog-centered">
-                                                    <div class="modal-content" style="border-radius: 22px;">
-                                                        <form method="POST">
-                                                            <div class="modal-header">
-                                                                <h5 class="modal-title">Request Withdrawal</h5>
-                                                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                                            </div>
+                                                    <textarea 
+                                                        name="member_note"
+                                                        class="form-control mb-2"
+                                                        rows="2"
+                                                        placeholder="Optional note"
+                                                    ></textarea>
 
-                                                            <div class="modal-body text-start">
-                                                                <input 
-                                                                    type="hidden" 
-                                                                    name="savings_request_id" 
-                                                                    value="<?php echo (int)$saving["id"]; ?>"
-                                                                >
-
-                                                                <div class="alert alert-info">
-                                                                    You are requesting to withdraw 
-                                                                    <strong><?php echo money($saving["expected_total_amount"]); ?></strong>.
-                                                                </div>
-
-                                                                <div class="mb-3">
-                                                                    <label class="form-label">Note to Admin</label>
-                                                                    <textarea 
-                                                                        name="member_note" 
-                                                                        class="form-control" 
-                                                                        rows="3"
-                                                                        placeholder="Optional note"
-                                                                    ></textarea>
-                                                                </div>
-                                                            </div>
-
-                                                            <div class="modal-footer">
-                                                                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
-                                                                    Cancel
-                                                                </button>
-
-                                                                <button type="submit" class="btn btn-dark">
-                                                                    Submit Request
-                                                                </button>
-                                                            </div>
-                                                        </form>
-                                                    </div>
-                                                </div>
-                                            </div>
+                                                    <button 
+                                                        type="submit" 
+                                                        class="btn btn-dark btn-sm"
+                                                        onclick="return confirm('Submit withdrawal request for <?php echo money($withdrawalData["withdrawal_amount"]); ?>?');"
+                                                    >
+                                                        Request Withdrawal
+                                                    </button>
+                                                </form>
+                                            <?php else: ?>
+                                                <button class="btn btn-outline-dark btn-sm" disabled>
+                                                    Not Ready
+                                                </button>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
-                                <?php endwhile; ?>
+                                <?php endforeach; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
-                                        No matured savings are ready for withdrawal yet.
+                                    <td colspan="7" class="text-center text-muted py-4">
+                                        No savings are available for withdrawal yet.
                                     </td>
                                 </tr>
                             <?php endif; ?>
@@ -714,24 +895,23 @@ function money($amount) {
                 </div>
             </div>
 
-            <div class="card-box withdrawal-history-card">
-                <div class="mb-3">
-                    <div class="section-title">Withdrawal History</div>
-                    <div class="section-subtitle">
-                        Track every withdrawal request, approval, rejection, and payment.
-                    </div>
-                </div>
+            <div class="card-box withdrawal-history-card mb-4">
+                <h5 class="section-title">Withdrawal History</h5>
+                <p class="section-subtitle">
+                    Track your previous withdrawal requests.
+                </p>
 
                 <div class="table-responsive">
                     <table class="table align-middle">
                         <thead>
                             <tr>
+                                <th>Reference</th>
                                 <th>Saved</th>
                                 <th>Return</th>
                                 <th>Withdrawal</th>
                                 <th>Status</th>
                                 <th>Requested</th>
-                                <th>Admin Note</th>
+                                <th>Paid</th>
                             </tr>
                         </thead>
 
@@ -739,6 +919,12 @@ function money($amount) {
                             <?php if ($withdrawalHistory->num_rows > 0): ?>
                                 <?php while ($row = $withdrawalHistory->fetch_assoc()): ?>
                                     <tr>
+                                        <td>
+                                            <span class="reference-code">
+                                                <?php echo htmlspecialchars(requestCode($member_code, $username, $row["savings_request_id"])); ?>
+                                            </span>
+                                        </td>
+
                                         <td>
                                             <?php echo money($row["amount_saved"]); ?>
                                         </td>
@@ -756,18 +942,80 @@ function money($amount) {
                                         </td>
 
                                         <td>
-                                            <?php echo date("d M Y H:i", strtotime($row["requested_at"])); ?>
+                                            <?php echo !empty($row["requested_at"]) ? date("d M Y H:i", strtotime($row["requested_at"])) : "-"; ?>
                                         </td>
 
                                         <td>
-                                            <?php echo htmlspecialchars($row["admin_note"] ?: "-"); ?>
+                                            <?php echo !empty($row["paid_at"]) ? date("d M Y H:i", strtotime($row["paid_at"])) : "-"; ?>
+                                        </td>
+                                    </tr>
+                                <?php endwhile; ?>
+                            <?php else: ?>
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted py-4">
+                                        No withdrawal requests yet.
+                                    </td>
+                                </tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card-box withdrawal-history-card">
+                <h5 class="section-title">Saving Cycles</h5>
+                <p class="section-subtitle">
+                    Your recent saving cycles and their status.
+                </p>
+
+                <div class="table-responsive">
+                    <table class="table align-middle">
+                        <thead>
+                            <tr>
+                                <th>Reference</th>
+                                <th>Amount</th>
+                                <th>Return</th>
+                                <th>Total</th>
+                                <th>Status</th>
+                                <th>Created</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                            <?php if ($savingsHistory->num_rows > 0): ?>
+                                <?php while ($row = $savingsHistory->fetch_assoc()): ?>
+                                    <tr>
+                                        <td>
+                                            <span class="reference-code">
+                                                <?php echo htmlspecialchars(requestCode($member_code, $username, $row["id"])); ?>
+                                            </span>
+                                        </td>
+
+                                        <td>
+                                            <?php echo money($row["amount"]); ?>
+                                        </td>
+
+                                        <td>
+                                            <?php echo money($row["expected_return_amount"]); ?>
+                                        </td>
+
+                                        <td>
+                                            <strong><?php echo money($row["expected_total_amount"]); ?></strong>
+                                        </td>
+
+                                        <td>
+                                            <?php echo savingBadge($row["status"]); ?>
+                                        </td>
+
+                                        <td>
+                                            <?php echo date("d M Y H:i", strtotime($row["created_at"])); ?>
                                         </td>
                                     </tr>
                                 <?php endwhile; ?>
                             <?php else: ?>
                                 <tr>
                                     <td colspan="6" class="text-center text-muted py-4">
-                                        You have not requested any withdrawals yet.
+                                        No saving cycles yet.
                                     </td>
                                 </tr>
                             <?php endif; ?>
@@ -781,21 +1029,6 @@ function money($amount) {
     </main>
 
 </div>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-
-<?php if ($preselectedSavingId > 0): ?>
-<script>
-document.addEventListener("DOMContentLoaded", function () {
-    const modal = document.getElementById("withdrawModal<?php echo $preselectedSavingId; ?>");
-
-    if (modal) {
-        const bsModal = new bootstrap.Modal(modal);
-        bsModal.show();
-    }
-});
-</script>
-<?php endif; ?>
 
 </body>
 </html>
