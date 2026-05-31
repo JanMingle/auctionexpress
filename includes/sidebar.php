@@ -64,6 +64,8 @@ if (!function_exists("isActivePage")) {
                 Dashboard
             </a>
 
+            
+
             <a href="<?php echo $appBase; ?>/admin/members.php" class="sidebar-link <?php echo isActivePage('members.php'); ?>">
                 <span class="sidebar-dot"></span>
                 Members
@@ -109,6 +111,11 @@ if (!function_exists("isActivePage")) {
                 <span class="sidebar-dot"></span>
                 Dashboard
             </a>
+
+            <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/profile.php" class="sidebar-link <?php echo isActivePage('profile.php'); ?>">
+    <span class="sidebar-dot"></span>
+    My Profile
+</a>
 
             <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/savings.php" class="sidebar-link <?php echo isActivePage('savings.php'); ?>">
                 <span class="sidebar-dot"></span>
