@@ -292,7 +292,7 @@ function safeDate($date) {
 
             <nav class="owner-nav">
                 <a href="dashboard.php" class="active">Dashboard</a>
-                <a href="#">Packages</a>
+                <a href="packages.php">Packages</a>
                 <a href="#">Tenants</a>
                 <a href="logout.php">Logout</a>
             </nav>
