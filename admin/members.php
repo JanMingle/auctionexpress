@@ -17,6 +17,8 @@ $stokvel_name = $_SESSION["stokvel_name"] ?? "Stokvel";
 $username = $_SESSION["username"] ?? "";
 $name = $_SESSION["name"] ?? "Admin";
 $displayName = $username ?: $name;
+$search = trim($_GET["search"] ?? "");
+$searchLike = "%" . $search . "%";
 
 $success = "";
 $error = "";
@@ -97,36 +99,93 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 }
 
-$membersStmt = $conn->prepare("
-    SELECT 
-        id, 
-        first_name, 
-        last_name, 
-        email, 
-        phone, 
-        username, 
-        member_code, 
-        status, 
-        created_at,
-        bank_name,
-bank_account_holder,
-bank_account_number,
-bank_branch_code,
-bank_account_type,
-banking_details_completed
-    FROM users
-    WHERE tenant_id = ?
-    AND role = 'member'
-    ORDER BY 
-        CASE 
-            WHEN status = 'pending' THEN 1
-            WHEN status = 'active' THEN 2
-            WHEN status = 'suspended' THEN 3
-            ELSE 4
-        END,
-        created_at DESC
-");
-$membersStmt->bind_param("i", $tenant_id);
+if ($search !== "") {
+    $membersStmt = $conn->prepare("
+        SELECT 
+            id, 
+            first_name, 
+            last_name, 
+            email, 
+            phone,
+            bank_name,
+            bank_account_holder,
+            bank_account_number,
+            bank_branch_code,
+            bank_account_type,
+            banking_details_completed,
+            username, 
+            member_code, 
+            status, 
+            created_at
+        FROM users
+        WHERE tenant_id = ?
+        AND role = 'member'
+        AND (
+            first_name LIKE ?
+            OR last_name LIKE ?
+            OR email LIKE ?
+            OR phone LIKE ?
+            OR username LIKE ?
+            OR member_code LIKE ?
+            OR bank_name LIKE ?
+            OR bank_account_holder LIKE ?
+            OR bank_account_number LIKE ?
+        )
+        ORDER BY 
+            CASE 
+                WHEN status = 'pending' THEN 1
+                WHEN status = 'active' THEN 2
+                WHEN status = 'suspended' THEN 3
+                ELSE 4
+            END,
+            created_at DESC
+    ");
+    $membersStmt->bind_param(
+        "isssssssss",
+        $tenant_id,
+        $searchLike,
+        $searchLike,
+        $searchLike,
+        $searchLike,
+        $searchLike,
+        $searchLike,
+        $searchLike,
+        $searchLike,
+        $searchLike
+    );
+} else {
+    $membersStmt = $conn->prepare("
+        SELECT 
+            id, 
+            first_name, 
+            last_name, 
+            email, 
+            phone,
+            bank_name,
+            bank_account_holder,
+            bank_account_number,
+            bank_branch_code,
+            bank_account_type,
+            banking_details_completed,
+            username, 
+            member_code, 
+            status, 
+            created_at
+        FROM users
+        WHERE tenant_id = ?
+        AND role = 'member'
+        ORDER BY 
+            CASE 
+                WHEN status = 'pending' THEN 1
+                WHEN status = 'active' THEN 2
+                WHEN status = 'suspended' THEN 3
+                ELSE 4
+            END,
+            created_at DESC
+    ");
+    $membersStmt->bind_param("i", $tenant_id);
+}
+
 $membersStmt->execute();
 $members = $membersStmt->get_result();
 
@@ -673,6 +732,32 @@ function memberStatusBadge($status) {
                         <?php echo $total_members; ?> member<?php echo $total_members === 1 ? "" : "s"; ?>
                     </span>
                 </div>
+
+                <form method="GET" class="mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col-md-9">
+            <input 
+                type="text"
+                name="search"
+                class="form-control"
+                value="<?php echo htmlspecialchars($search); ?>"
+                placeholder="Search by name, username, member code, phone, email, bank or account number..."
+            >
+        </div>
+
+        <div class="col-md-3 d-flex gap-2">
+            <button type="submit" class="btn btn-dark w-100">
+                Search
+            </button>
+
+            <?php if ($search !== ""): ?>
+                <a href="members.php" class="btn btn-outline-dark">
+                    Clear
+                </a>
+            <?php endif; ?>
+        </div>
+    </div>
+</form>
 
                 <div class="table-responsive">
                     <table class="table align-middle">

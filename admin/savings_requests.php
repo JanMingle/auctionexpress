@@ -17,6 +17,8 @@ $stokvel_name = $_SESSION["stokvel_name"] ?? "Stokvel";
 $username = $_SESSION["username"] ?? "";
 $name = $_SESSION["name"] ?? "Admin";
 $displayName = $username ?: $name;
+$search = trim($_GET["search"] ?? "");
+$searchLike = "%" . $search . "%";
 
 $success = "";
 $error = "";
@@ -146,7 +148,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 }
 
-$requestsStmt = $conn->prepare("
+$baseRequestsSql = "
     SELECT 
         savings_requests.id,
         savings_requests.amount,
@@ -172,6 +174,25 @@ $requestsStmt = $conn->prepare("
     FROM savings_requests
     INNER JOIN users ON users.id = savings_requests.user_id
     WHERE savings_requests.tenant_id = ?
+";
+
+if ($search !== "") {
+    $baseRequestsSql .= "
+        AND (
+            users.first_name LIKE ?
+            OR users.last_name LIKE ?
+            OR users.email LIKE ?
+            OR users.phone LIKE ?
+            OR users.username LIKE ?
+            OR users.member_code LIKE ?
+            OR savings_requests.status LIKE ?
+            OR savings_requests.id LIKE ?
+            OR CONCAT(users.member_code, '-SAV', LPAD(savings_requests.id, 5, '0')) LIKE ?
+        )
+    ";
+}
+
+$baseRequestsSql .= "
     ORDER BY 
         CASE
             WHEN savings_requests.status = 'payment_submitted' THEN 1
@@ -183,8 +204,28 @@ $requestsStmt = $conn->prepare("
             ELSE 7
         END,
         savings_requests.created_at DESC
-");
-$requestsStmt->bind_param("i", $tenant_id);
+";
+
+$requestsStmt = $conn->prepare($baseRequestsSql);
+
+if ($search !== "") {
+    $requestsStmt->bind_param(
+        "isssssssss",
+        $tenant_id,
+        $searchLike,
+        $searchLike,
+        $searchLike,
+        $searchLike,
+        $searchLike,
+        $searchLike,
+        $searchLike,
+        $searchLike,
+        $searchLike
+    );
+} else {
+    $requestsStmt->bind_param("i", $tenant_id);
+}
+
 $requestsStmt->execute();
 $requests = $requestsStmt->get_result();
 
@@ -802,12 +843,39 @@ function statusBadge($status) {
                     </span>
                 </div>
 
+                <form method="GET" class="mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col-md-9">
+            <input 
+                type="text"
+                name="search"
+                class="form-control"
+                value="<?php echo htmlspecialchars($search); ?>"
+                placeholder="Search by name, phone, username, member code, request code, status..."
+            >
+        </div>
+
+        <div class="col-md-3 d-flex gap-2">
+            <button type="submit" class="btn btn-dark w-100">
+                Search
+            </button>
+
+            <?php if ($search !== ""): ?>
+                <a href="savings_requests.php" class="btn btn-outline-dark">
+                    Clear
+                </a>
+            <?php endif; ?>
+        </div>
+    </div>
+</form>
+
                 <div class="table-responsive">
                     <table class="table align-middle">
                         <thead>
                             <tr>
-                                <th>Member</th>
-                                <th>Amount</th>
+                              <th>Member</th>
+<th>Reference Code</th>
+<th>Amount</th>
                                 <th>Proof / Payment</th>
                                 <th>Return</th>
                                 <th>Total</th>
@@ -849,6 +917,21 @@ function statusBadge($status) {
                                                 </div>
                                             </div>
                                         </td>
+
+                                        <td>
+    <?php
+        $memberCode = $row["member_code"] ?: ($row["username"] ?: "MEMBER");
+        $requestCode = $memberCode . "-SAV" . str_pad($row["id"], 5, "0", STR_PAD_LEFT);
+    ?>
+
+    <span class="code-pill">
+        <?php echo htmlspecialchars($requestCode); ?>
+    </span>
+
+    <div class="text-muted mt-1" style="font-size: 12px;">
+        Use as payment reference
+    </div>
+</td>
 
                                         <td>
                                             <strong><?php echo money($row["amount"]); ?></strong>
@@ -965,7 +1048,7 @@ function statusBadge($status) {
                                 <?php endwhile; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="9" class="text-center text-muted py-4">
+                                    <td colspan="10" class="text-center text-muted py-4">
                                         No saving requests have been submitted yet.
                                     </td>
                                 </tr>
