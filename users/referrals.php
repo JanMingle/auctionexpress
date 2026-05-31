@@ -21,6 +21,9 @@ $name = $_SESSION["name"] ?? "Member";
 
 $displayName = $username ?: ($member_code ?: $name);
 $refCode = $member_code ?: $username;
+$error = "";
+$success = "";
+$minimum_claim_amount = 100.00;
 
 $tenantStmt = $conn->prepare("
     SELECT tenant_code
@@ -39,6 +42,44 @@ $host = $_SERVER["HTTP_HOST"];
 $basePath = rtrim(dirname($_SERVER["SCRIPT_NAME"], 2), "/\\");
 
 $referralLink = $scheme . "://" . $host . $basePath . "/signup.php?tenant=" . urlencode($tenant_code) . "&ref=" . urlencode($refCode);
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $form_action = $_POST["form_action"] ?? "";
+
+    if ($form_action === "claim_bonus") {
+        $claimCheckStmt = $conn->prepare("
+            SELECT
+                SUM(bonus_amount) AS claimable_bonus
+            FROM referral_bonuses
+            WHERE tenant_id = ?
+            AND upliner_user_id = ?
+            AND status = 'earned'
+        ");
+        $claimCheckStmt->bind_param("ii", $tenant_id, $user_id);
+        $claimCheckStmt->execute();
+        $claimData = $claimCheckStmt->get_result()->fetch_assoc();
+
+        $claimable_bonus = (float)($claimData["claimable_bonus"] ?? 0);
+
+        if ($claimable_bonus < $minimum_claim_amount) {
+            $error = "You can only claim your bonus when it reaches R" . number_format($minimum_claim_amount, 2) . " or more.";
+        } else {
+            $claimStmt = $conn->prepare("
+                UPDATE referral_bonuses
+                SET status = 'claimed'
+                WHERE tenant_id = ?
+                AND upliner_user_id = ?
+                AND status = 'earned'
+            ");
+            $claimStmt->bind_param("ii", $tenant_id, $user_id);
+
+            if ($claimStmt->execute()) {
+                $success = "Your bonus claim of R" . number_format($claimable_bonus, 2) . " has been submitted. Please wait for admin payout.";
+            } else {
+                $error = "Could not submit your bonus claim. Please try again.";
+            }
+        }
+    }
+}
 
 $statsStmt = $conn->prepare("
     SELECT
@@ -61,6 +102,7 @@ $bonusStatsStmt = $conn->prepare("
     SELECT
         COUNT(*) AS total_bonus_records,
         SUM(CASE WHEN status = 'earned' THEN bonus_amount ELSE 0 END) AS earned_bonus,
+        SUM(CASE WHEN status = 'claimed' THEN bonus_amount ELSE 0 END) AS claimed_bonus,
         SUM(CASE WHEN status = 'paid' THEN bonus_amount ELSE 0 END) AS paid_bonus
     FROM referral_bonuses
     WHERE tenant_id = ?
@@ -72,7 +114,9 @@ $bonusStats = $bonusStatsStmt->get_result()->fetch_assoc();
 
 $total_bonus_records = (int)($bonusStats["total_bonus_records"] ?? 0);
 $earned_bonus = (float)($bonusStats["earned_bonus"] ?? 0);
+$claimed_bonus = (float)($bonusStats["claimed_bonus"] ?? 0);
 $paid_bonus = (float)($bonusStats["paid_bonus"] ?? 0);
+$can_claim_bonus = $earned_bonus >= $minimum_claim_amount;
 
 $referralsStmt = $conn->prepare("
     SELECT 
@@ -136,10 +180,13 @@ function statusBadge($status) {
         return '<span class="badge badge-pending">Pending</span>';
     }
 
-    if ($status === "active" || $status === "earned" || $status === "paid") {
-        return '<span class="badge badge-approved">' . ucfirst(htmlspecialchars($status)) . '</span>';
-    }
+ if ($status === "active" || $status === "earned" || $status === "paid") {
+    return '<span class="badge badge-approved">' . ucfirst(htmlspecialchars($status)) . '</span>';
+}
 
+if ($status === "claimed") {
+    return '<span class="badge badge-pending">Claimed</span>';
+}
     if ($status === "suspended" || $status === "cancelled") {
         return '<span class="badge badge-rejected">' . ucfirst(htmlspecialchars($status)) . '</span>';
     }
@@ -304,6 +351,18 @@ function statusBadge($status) {
                 </p>
             </div>
 
+            <?php if (!empty($success)): ?>
+    <div class="alert alert-success">
+        <?php echo htmlspecialchars($success); ?>
+    </div>
+<?php endif; ?>
+
+<?php if (!empty($error)): ?>
+    <div class="alert alert-danger">
+        <?php echo htmlspecialchars($error); ?>
+    </div>
+<?php endif; ?>
+
             <div class="row g-3 mb-4">
                 <div class="col-md-3">
                     <div class="stat-card stat-card-green">
@@ -327,13 +386,56 @@ function statusBadge($status) {
                 </div>
 
                 <div class="col-md-3">
-                    <div class="stat-card stat-card-red">
-                        <div class="stat-label">Paid Bonus</div>
-                        <div class="stat-value"><?php echo money($paid_bonus); ?></div>
-                    </div>
-                </div>
+    <div class="stat-card stat-card-red">
+        <div class="stat-label">Claimed / Paid</div>
+        <div class="stat-value"><?php echo money($claimed_bonus); ?></div>
+        <div class="text-muted" style="font-size: 13px; position: relative; z-index: 2;">
+            Paid: <?php echo money($paid_bonus); ?>
+        </div>
+    </div>
+</div>
+            </div>
+<div class="card-box referral-card-green mb-4">
+    <div class="section-title mb-2">Claim Referral Bonus</div>
+
+    <p class="text-muted" style="font-size: 13px;">
+        You can claim your referral bonus when your earned bonus reaches 
+        <strong><?php echo money($minimum_claim_amount); ?></strong> or more.
+    </p>
+
+    <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap">
+        <div>
+            <div class="text-muted" style="font-size: 13px;">Available to claim</div>
+            <div style="font-size: 28px; font-weight: 900; color: #073f2f;">
+                <?php echo money($earned_bonus); ?>
             </div>
 
+            <?php if ($claimed_bonus > 0): ?>
+                <div class="text-muted" style="font-size: 13px;">
+                    Already claimed and waiting for payout: <?php echo money($claimed_bonus); ?>
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <?php if ($can_claim_bonus): ?>
+            <form method="POST">
+                <input type="hidden" name="form_action" value="claim_bonus">
+
+                <button 
+                    type="submit" 
+                    class="btn btn-dark"
+                    onclick="return confirm('Claim your available referral bonus now?');"
+                >
+                    Claim Bonus
+                </button>
+            </form>
+        <?php else: ?>
+            <button type="button" class="btn btn-outline-dark" disabled>
+                Minimum <?php echo money($minimum_claim_amount); ?>
+            </button>
+        <?php endif; ?>
+    </div>
+</div>
             <div class="card-box referral-card-gold mb-4">
                 <div class="section-title mb-2">Your Referral Link</div>
                 <p class="text-muted" style="font-size: 13px;">
