@@ -47,12 +47,41 @@ $settings = $settingsStmt->get_result()->fetch_assoc();
 $return_rate_percent = (float)($settings["return_rate_percent"] ?? 10.00);
 $maturity_days = (int)($settings["maturity_days"] ?? 30);
 
+$minimum_saving_amount = 200.00;
+$admin_fee_amount = 20.00;
+
 $bank_name = $settings["bank_name"] ?? "";
 $account_holder = $settings["account_holder"] ?? "";
 $account_number = $settings["account_number"] ?? "";
 $branch_code = $settings["branch_code"] ?? "";
 $account_type = $settings["account_type"] ?? "";
 $payment_reference_note = $settings["payment_reference_note"] ?? "";
+function normalizeMoneyInput($value) {
+    $value = trim((string)$value);
+    $value = str_replace(" ", "", $value);
+
+    // If user types 2,000 or 2,000.50, remove thousands comma.
+    if (strpos($value, ",") !== false && strpos($value, ".") !== false) {
+        $value = str_replace(",", "", $value);
+    } else {
+        // If user types 200,50 treat comma as decimal.
+        $value = str_replace(",", ".", $value);
+    }
+
+    $value = preg_replace("/[^0-9.]/", "", $value);
+
+    // Keep only the first decimal point.
+    $parts = explode(".", $value);
+    if (count($parts) > 2) {
+        $value = array_shift($parts) . "." . implode("", $parts);
+    }
+
+    return $value;
+}
+
+function money($amount) {
+    return "R" . number_format((float)$amount, 2);
+}
 
 function getOpenPaymentRequest($conn, $tenant_id, $user_id) {
     $stmt = $conn->prepare("
@@ -78,21 +107,26 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $form_action = $_POST["form_action"] ?? "";
 
     if ($form_action === "create_saving") {
-       $amount = trim($_POST["amount"] ?? "");
-$amount = str_replace(",", ".", $amount);
-$amount = preg_replace("/[^0-9.]/", "", $amount);
+      $amount = normalizeMoneyInput($_POST["amount"] ?? "");
         $note = trim($_POST["note"] ?? "");
 
-        if ($has_open_request) {
-            $error = "You already have a saving request waiting for payment or admin approval.";
-        } elseif ($amount === "") {
-            $error = "Please enter how much you want to save.";
-        } elseif (!is_numeric($amount) || $amount <= 0) {
-            $error = "Please enter a valid amount.";
-        } else {
-            $amount = (float)$amount;
-            $expected_return_amount = ($amount * $return_rate_percent) / 100;
-            $expected_total_amount = $amount + $expected_return_amount;
+      if ($has_open_request) {
+    $error = "You already have a saving request waiting for payment or admin approval.";
+} elseif ($amount === "") {
+    $error = "Please enter how much you want to save.";
+} elseif (!is_numeric($amount) || (float)$amount <= 0) {
+    $error = "Please enter a valid amount.";
+} elseif ((float)$amount < $minimum_saving_amount) {
+    $error = "Minimum saving amount is " . money($minimum_saving_amount) . ".";
+} else {
+    $amount = (float)$amount;
+
+    // Admin fee is only added to the deposit amount.
+    // It must not be included in return calculations.
+    $deposit_amount = $amount + $admin_fee_amount;
+
+    $expected_return_amount = ($amount * $return_rate_percent) / 100;
+    $expected_total_amount = $amount + $expected_return_amount;
 
             $stmt = $conn->prepare("
                 INSERT INTO savings_requests
@@ -123,7 +157,7 @@ $amount = preg_replace("/[^0-9.]/", "", $amount);
             );
 
             if ($stmt->execute()) {
-                $success = "Your saving request has been created. Please deposit the money and upload proof of payment.";
+               $success = "Your saving request has been created. Please deposit " . money($deposit_amount) . " including the " . money($admin_fee_amount) . " admin fee, then upload proof of payment.";
 
                 $openRequest = [
                     "id" => $conn->insert_id,
@@ -687,18 +721,31 @@ function requestBadge($status, $maturesAt = null) {
 
                             <div class="mb-3">
                                 <label class="form-label">Amount You Want to Save *</label>
-                           <input 
+ <input 
     type="text" 
     name="amount" 
     id="amountInput"
     class="form-control" 
     inputmode="decimal"
     pattern="^[0-9]+([.,][0-9]{1,2})?$"
-    placeholder="Example: 2000"
+    placeholder="Minimum R200"
     <?php echo $has_open_request ? "disabled" : ""; ?>
     required
 >
                             </div>
+                            <div class="mt-3" id="depositPreview" style="display:none;">
+    <div class="alert alert-info mb-0">
+        <div><strong>Saving amount:</strong> <span id="savingAmountText">R0.00</span></div>
+        <div><strong>Admin fee:</strong> <span id="adminFeeText">R20.00</span></div>
+        <div><strong>Total to deposit:</strong> <span id="depositAmountText">R0.00</span></div>
+        <hr>
+        <div><strong>Expected return:</strong> <span id="returnAmountText">R0.00</span></div>
+        <div><strong>Expected payout:</strong> <span id="payoutAmountText">R0.00</span></div>
+        <small class="text-muted">
+            The admin fee is not included when calculating your return.
+        </small>
+    </div>
+</div>
 
                             <div class="live-return-box mb-3">
                                 <div class="row g-3">
@@ -739,23 +786,49 @@ function requestBadge($status, $maturesAt = null) {
                         </form>
                     </div>
 
-                    <div class="card-box bank-card">
-                        <h5 class="savings-section-title mb-3">Bank Details</h5>
+                   <?php if ($has_open_request): ?>
+    <div class="card-box bank-card">
+        <h5 class="savings-section-title mb-3">Bank Details</h5>
 
-                        <div class="bank-box">
-                            <p class="mb-1"><strong>Bank:</strong> <?php echo htmlspecialchars($bank_name ?: "-"); ?></p>
-                            <p class="mb-1"><strong>Account Holder:</strong> <?php echo htmlspecialchars($account_holder ?: "-"); ?></p>
-                            <p class="mb-1"><strong>Account Number:</strong> <?php echo htmlspecialchars($account_number ?: "-"); ?></p>
-                            <p class="mb-1"><strong>Branch Code:</strong> <?php echo htmlspecialchars($branch_code ?: "-"); ?></p>
-                            <p class="mb-1"><strong>Account Type:</strong> <?php echo htmlspecialchars($account_type ?: "-"); ?></p>
+        <div class="bank-box">
+            <div class="alert alert-info mb-3">
+                Deposit only after submitting your saving request.
+                Your proof of payment must match the required deposit amount.
+            </div>
 
-                            <hr>
+            <p class="mb-1">
+                <strong>Bank:</strong> 
+                <?php echo htmlspecialchars($bank_name ?: "-"); ?>
+            </p>
 
-                            <p class="text-muted mb-0">
-                                <?php echo nl2br(htmlspecialchars($payment_reference_note ?: "Use your full name as payment reference.")); ?>
-                            </p>
-                        </div>
-                    </div>
+            <p class="mb-1">
+                <strong>Account Holder:</strong> 
+                <?php echo htmlspecialchars($account_holder ?: "-"); ?>
+            </p>
+
+            <p class="mb-1">
+                <strong>Account Number:</strong> 
+                <?php echo htmlspecialchars($account_number ?: "-"); ?>
+            </p>
+
+            <p class="mb-1">
+                <strong>Branch Code:</strong> 
+                <?php echo htmlspecialchars($branch_code ?: "-"); ?>
+            </p>
+
+            <p class="mb-1">
+                <strong>Account Type:</strong> 
+                <?php echo htmlspecialchars($account_type ?: "-"); ?>
+            </p>
+
+            <hr>
+
+            <p class="text-muted mb-0">
+                <?php echo nl2br(htmlspecialchars($payment_reference_note ?: "Use your full name as payment reference.")); ?>
+            </p>
+        </div>
+    </div>
+<?php endif; ?>
                 </div>
 
                                     <?php if ($has_open_request && in_array(($openRequest["status"] ?? ""), ["pending", "pending_payment"], true)): ?>
@@ -765,7 +838,15 @@ function requestBadge($status, $maturesAt = null) {
                             <div class="proof-upload-box">
                                 <div class="alert alert-info">
                                     Upload proof for your saving request of 
-                                    <strong>R<?php echo number_format((float)($openRequest["amount"] ?? 0), 2); ?></strong>.
+                                  <div class="alert alert-info">
+    Upload proof for your total deposit of 
+    <strong><?php echo money(((float)($openRequest["amount"] ?? 0)) + $admin_fee_amount); ?></strong>.
+    <br>
+    <small>
+        Saving amount: <?php echo money((float)($openRequest["amount"] ?? 0)); ?> ·
+        Admin fee: <?php echo money($admin_fee_amount); ?>
+    </small>
+</div>
                                 </div>
 
                                 <form method="POST" enctype="multipart/form-data">
@@ -1002,6 +1083,74 @@ function updateCountdowns() {
 updateCountdowns();
 setInterval(updateCountdowns, 1000);
 </script>
+<script>
+const amountInput = document.getElementById("amountInput");
 
+const minimumSavingAmount = <?php echo json_encode($minimum_saving_amount); ?>;
+const adminFeeAmount = <?php echo json_encode($admin_fee_amount); ?>;
+const returnRatePercent = <?php echo json_encode($return_rate_percent); ?>;
+
+const depositPreview = document.getElementById("depositPreview");
+const savingAmountText = document.getElementById("savingAmountText");
+const adminFeeText = document.getElementById("adminFeeText");
+const depositAmountText = document.getElementById("depositAmountText");
+const returnAmountText = document.getElementById("returnAmountText");
+const payoutAmountText = document.getElementById("payoutAmountText");
+
+function formatMoney(amount) {
+    return "R" + Number(amount || 0).toLocaleString("en-ZA", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+
+function cleanAmount(value) {
+    value = String(value || "").trim().replace(/\s/g, "");
+
+    if (value.includes(",") && value.includes(".")) {
+        value = value.replace(/,/g, "");
+    } else {
+        value = value.replace(/,/g, ".");
+    }
+
+    return value.replace(/[^0-9.]/g, "");
+}
+
+function updateDepositPreview() {
+    if (!amountInput || !depositPreview) {
+        return;
+    }
+
+    const amount = parseFloat(cleanAmount(amountInput.value)) || 0;
+
+    if (amount <= 0) {
+        depositPreview.style.display = "none";
+        return;
+    }
+
+    const depositAmount = amount + adminFeeAmount;
+    const expectedReturn = (amount * returnRatePercent) / 100;
+    const expectedPayout = amount + expectedReturn;
+
+    depositPreview.style.display = "block";
+
+    savingAmountText.textContent = formatMoney(amount);
+    adminFeeText.textContent = formatMoney(adminFeeAmount);
+    depositAmountText.textContent = formatMoney(depositAmount);
+    returnAmountText.textContent = formatMoney(expectedReturn);
+    payoutAmountText.textContent = formatMoney(expectedPayout);
+
+    if (amount < minimumSavingAmount) {
+        depositPreview.classList.add("border", "border-danger");
+    } else {
+        depositPreview.classList.remove("border", "border-danger");
+    }
+}
+
+if (amountInput) {
+    amountInput.addEventListener("input", updateDepositPreview);
+    updateDepositPreview();
+}
+</script>
 </body>
 </html>
