@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once "../config/db.php";
+require_once "../includes/package_rules.php";
 
 if (!isset($_SESSION["user_id"])) {
     header("Location: ../login.php");
@@ -14,6 +15,11 @@ if ($_SESSION["role"] !== "member") {
 
 $user_id = (int)$_SESSION["user_id"];
 $tenant_id = (int)$_SESSION["tenant_id"];
+$packageRules = getTenantPackageRules($conn, $tenant_id);
+
+$enable_referrals = (int)$packageRules["enable_referrals"];
+$enable_bonus_claims = (int)$packageRules["enable_bonus_claims"];
+$minimum_claim_amount = (float)$packageRules["bonus_claim_minimum"];
 $stokvel_name = $_SESSION["stokvel_name"] ?? "Stokvel";
 $username = $_SESSION["username"] ?? "";
 $member_code = $_SESSION["member_code"] ?? "";
@@ -23,7 +29,7 @@ $displayName = $username ?: ($member_code ?: $name);
 $refCode = $member_code ?: $username;
 $error = "";
 $success = "";
-$minimum_claim_amount = 100.00;
+
 
 $tenantStmt = $conn->prepare("
     SELECT tenant_code
@@ -54,6 +60,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             AND upliner_user_id = ?
             AND status = 'earned'
         ");
+
+        
         $claimCheckStmt->bind_param("ii", $tenant_id, $user_id);
         $claimCheckStmt->execute();
         $claimData = $claimCheckStmt->get_result()->fetch_assoc();
