@@ -1,4 +1,4 @@
-name: Deploy PHP app to webhost
+name: Deploy Auction Express via FTP
 
 on:
   push:
@@ -7,11 +7,11 @@ on:
 
 jobs:
   deploy:
-    name: Upload files to webhost
+    name: Upload to Production
     runs-on: ubuntu-latest
 
     steps:
-      - name: Get latest code
+      - name: Checkout latest code
         uses: actions/checkout@v4
 
       - name: Deploy via FTP
@@ -20,12 +20,16 @@ jobs:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          server-dir: ${{ secrets.SERVER_DIR }}
+          local-dir: ./
+          server-dir: /domains/auctionexpress.club/public_html/
           exclude: |
             **/.git*
             **/.git*/**
+            **/.github/**
             **/node_modules/**
             config/db.php
+            db.php
+            .env
             uploads/**
             __debug_500.log
             __student_debug_500.log
