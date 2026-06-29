@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once "../config/db.php";
+require_once "../includes/package_rules.php";
 
 if (!isset($_SESSION["user_id"])) {
     header("Location: ../login.php");
@@ -21,18 +22,21 @@ $displayName = $username ?: $name;
 $success = "";
 $error = "";
 
-$checkSettings = $conn->prepare("
-    INSERT IGNORE INTO stokvel_settings (tenant_id, return_rate_percent, maturity_days)
-    VALUES (?, 10.00, 30)
-");
-$checkSettings->bind_param("i", $tenant_id);
-$checkSettings->execute();
+/*
+    The owner package is now the main source of truth.
+    This pulls the assigned package from tenants.package_id
+    and keeps stokvel_settings synced for old pages that still read stokvel_settings.
+*/
+$packageRules = syncPackageSettingsForTenant($conn, $tenant_id);
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
-    $return_rate_percent = trim($_POST["return_rate_percent"] ?? "");
-    $maturity_days = trim($_POST["maturity_days"] ?? "");
-  $recruitment_bonus_percent = trim($_POST["recruitment_bonus_percent"] ?? "0");
-$recruitment_bonus_percent = str_replace(",", ".", $recruitment_bonus_percent);
+    /*
+        These three are no longer taken from the form.
+        They come directly from the assigned owner package.
+    */
+    $return_rate_percent = (float)($packageRules["return_rate_percent"] ?? 10);
+    $maturity_days = (int)($packageRules["maturity_days"] ?? 30);
+    $recruitment_bonus_percent = (float)($packageRules["recruitment_bonus_percent"] ?? 0);
 
     $bank_name = trim($_POST["bank_name"] ?? "");
     $account_holder = trim($_POST["account_holder"] ?? "");
@@ -41,67 +45,58 @@ $recruitment_bonus_percent = str_replace(",", ".", $recruitment_bonus_percent);
     $account_type = trim($_POST["account_type"] ?? "");
     $payment_reference_note = trim($_POST["payment_reference_note"] ?? "");
 
-    if ($return_rate_percent === "" || !is_numeric($return_rate_percent)) {
-        $error = "Please enter a valid return percentage.";
-    } elseif ((float)$return_rate_percent < 0) {
-        $error = "Return percentage cannot be less than 0.";
-    } elseif ($maturity_days === "" || !is_numeric($maturity_days) || (int)$maturity_days <= 0) {
-        $error = "Please enter valid maturity days.";
-       } elseif (!is_numeric($recruitment_bonus_percent) || (float)$recruitment_bonus_percent < 0) {
-    $error = "Please enter a valid recruitment bonus percentage.";
+    $stmt = $conn->prepare("
+        UPDATE stokvel_settings
+        SET
+            return_rate_percent = ?,
+            maturity_days = ?,
+            recruitment_bonus_percent = ?,
+            bank_name = ?,
+            account_holder = ?,
+            account_number = ?,
+            branch_code = ?,
+            account_type = ?,
+            payment_reference_note = ?
+        WHERE tenant_id = ?
+    ");
+
+    $stmt->bind_param(
+        "didssssssi",
+        $return_rate_percent,
+        $maturity_days,
+        $recruitment_bonus_percent,
+        $bank_name,
+        $account_holder,
+        $account_number,
+        $branch_code,
+        $account_type,
+        $payment_reference_note,
+        $tenant_id
+    );
+
+    if ($stmt->execute()) {
+        $success = "Settings updated successfully. Package rules are controlled from Owner Packages.";
     } else {
-        $return_rate_percent = number_format((float)$return_rate_percent, 2, ".", "");
-        $maturity_days = (int)$maturity_days;
-        $recruitment_bonus_percent = number_format((float)$recruitment_bonus_percent, 2, ".", "");
-
-        $stmt = $conn->prepare("
-           UPDATE stokvel_settings
-SET 
-    return_rate_percent = ?,
-    maturity_days = ?,
-    recruitment_bonus_percent = ?,
-    bank_name = ?,
-                account_holder = ?,
-                account_number = ?,
-                branch_code = ?,
-                account_type = ?,
-                payment_reference_note = ?
-            WHERE tenant_id = ?
-        ");
-
-$stmt->bind_param(
-    "didssssssi",
-    $return_rate_percent,
-    $maturity_days,
-    $recruitment_bonus_percent,
-    $bank_name,
-    $account_holder,
-    $account_number,
-    $branch_code,
-    $account_type,
-    $payment_reference_note,
-    $tenant_id
-);
-
-        if ($stmt->execute()) {
-            $success = "Stokvel settings updated successfully.";
-        } else {
-            $error = "Could not update settings.";
-        }
+        $error = "Could not update settings.";
     }
+
+    /*
+        Re-sync after saving, just to keep values clean.
+    */
+    $packageRules = syncPackageSettingsForTenant($conn, $tenant_id);
 }
 
 $settingsStmt = $conn->prepare("
-SELECT 
-    return_rate_percent,
-    maturity_days,
-    recruitment_bonus_percent,
-    bank_name,
-    account_holder,
-    account_number,
-    branch_code,
-    account_type,
-    payment_reference_note
+    SELECT
+        return_rate_percent,
+        maturity_days,
+        recruitment_bonus_percent,
+        bank_name,
+        account_holder,
+        account_number,
+        branch_code,
+        account_type,
+        payment_reference_note
     FROM stokvel_settings
     WHERE tenant_id = ?
     LIMIT 1
@@ -110,15 +105,22 @@ $settingsStmt->bind_param("i", $tenant_id);
 $settingsStmt->execute();
 $settings = $settingsStmt->get_result()->fetch_assoc();
 
-$return_rate_percent = $settings["return_rate_percent"] ?? 10.00;
-$maturity_days = $settings["maturity_days"] ?? 30;
-$recruitment_bonus_percent = $settings["recruitment_bonus_percent"] ?? 0.00;
+/*
+    Display package values, not manually edited settings values.
+*/
+$return_rate_percent = (float)($packageRules["return_rate_percent"] ?? ($settings["return_rate_percent"] ?? 10.00));
+$maturity_days = (int)($packageRules["maturity_days"] ?? ($settings["maturity_days"] ?? 30));
+$recruitment_bonus_percent = (float)($packageRules["recruitment_bonus_percent"] ?? ($settings["recruitment_bonus_percent"] ?? 0.00));
+
 $bank_name = $settings["bank_name"] ?? "";
 $account_holder = $settings["account_holder"] ?? "";
 $account_number = $settings["account_number"] ?? "";
 $branch_code = $settings["branch_code"] ?? "";
 $account_type = $settings["account_type"] ?? "";
 $payment_reference_note = $settings["payment_reference_note"] ?? "";
+
+$assigned_package_name = $packageRules["package_name"] ?? "No package assigned";
+$assigned_package_type = $packageRules["package_type"] ?? "savings";
 
 $sample_amount = 500;
 $sample_return = ($sample_amount * (float)$return_rate_percent) / 100;
