@@ -676,7 +676,7 @@
             </div>
 
             <h1 class="hero-title">
-                Save together. <span>Grow together.</span>
+                fave together. <span>Grow together.</span>
             </h1>
 
             <p class="hero-text">
