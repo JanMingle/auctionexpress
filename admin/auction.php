@@ -219,12 +219,17 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             try {
                 $conn->begin_transaction();
 
-                $package_id = (int)$packageRules["package_id"];
-                $return_percent = (float)($packageRules["auction_return_percent"] ?? 3);
-                $maturity_days = (int)($packageRules["auction_maturity_days"] ?? 3);
-                $min_coins = (float)($packageRules["auction_min_coins"] ?? 0);
+             $package_id = (int)$packageRules["package_id"];
 
-                if ($return_percent <= 0) {
+/*
+    Auction must follow Owner Package settings.
+    Do not use old auction_return_percent or auction_maturity_days here.
+*/
+$return_percent = (float)($packageRules["return_rate_percent"] ?? 0);
+$maturity_days = (int)($packageRules["maturity_days"] ?? 0);
+$min_coins = (float)($packageRules["minimum_saving_amount"] ?? 0);
+
+if ($return_percent <= 0) {
                     throw new Exception("Auction return percentage is not valid.");
                 }
 
@@ -240,16 +245,25 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $tenantStmt->bind_param("i", $tenant_id);
                 $tenantStmt->execute();
 
-                $scheduledStmt = $conn->prepare("
-                    UPDATE auction_lots
-                    SET status = 'open',
-                        updated_at = NOW()
-                    WHERE tenant_id = ?
-                    AND status = 'scheduled'
-                    AND remaining_coins > 0
-                ");
-                $scheduledStmt->bind_param("i", $tenant_id);
-                $scheduledStmt->execute();
+          $scheduledStmt = $conn->prepare("
+    UPDATE auction_lots
+    SET status = 'open',
+        package_id = ?,
+        return_percent = ?,
+        maturity_days = ?,
+        updated_at = NOW()
+    WHERE tenant_id = ?
+    AND status = 'scheduled'
+    AND remaining_coins > 0
+");
+$scheduledStmt->bind_param(
+    "idii",
+    $package_id,
+    $return_percent,
+    $maturity_days,
+    $tenant_id
+);
+$scheduledStmt->execute();
 
                 $membersStmt = $conn->prepare("
                     SELECT id
@@ -689,8 +703,8 @@ $lotsStmt->bind_param("i", $tenant_id);
 $lotsStmt->execute();
 $lots = $lotsStmt->get_result();
 
-$returnPercent = (float)($packageRules["auction_return_percent"] ?? 3);
-$maturityDays = (int)($packageRules["auction_maturity_days"] ?? 3);
+$returnPercent = (float)($packageRules["return_rate_percent"] ?? 0);
+$maturityDays = (int)($packageRules["maturity_days"] ?? 0);
 $packageName = $packageRules["package_name"] ?? "Auction Package";
 ?>
 
