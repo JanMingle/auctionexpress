@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once "../config/db.php";
+require_once "../includes/package_rules.php";
 
 if (!isset($_SESSION["user_id"])) {
     header("Location: ../login.php");
@@ -21,6 +22,16 @@ $displayName = $username ?: $name;
 
 $success = "";
 $error = "";
+
+$packageRules = getTenantPackageRules($conn, $tenant_id);
+
+$current_package_id = (int)($packageRules["package_id"] ?? 0);
+$current_return_percent = (float)($packageRules["return_rate_percent"] ?? 0);
+$current_maturity_days = (int)($packageRules["maturity_days"] ?? 0);
+
+if ($current_maturity_days <= 0) {
+    $current_maturity_days = 30;
+}
 
 function coins($amount) {
     return number_format((float)$amount, 2) . " coins";
@@ -145,16 +156,19 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $buyer_user_id = (int)$claim["buyer_user_id"];
             $seller_user_id = (int)$claim["seller_user_id"];
             $lot_id = (int)$claim["lot_id"];
-            $principal = (float)$claim["principal_coins"];
-            $maturity_days = (int)$claim["maturity_days"];
-            $source_claim_id = (int)($claim["source_claim_id"] ?? 0);
+        $principal = (float)$claim["principal_coins"];
+$source_claim_id = (int)($claim["source_claim_id"] ?? 0);
 
-            if ($maturity_days <= 0) {
-                $maturity_days = 3;
-            }
+/*
+    Use Owner Package values, not old auction_lots values.
+*/
+$return_percent = $current_return_percent;
+$maturity_days = $current_maturity_days;
 
-            $matures_at = date("Y-m-d H:i:s", strtotime("+" . $maturity_days . " days"));
+$return_coins = round(($principal * $return_percent) / 100, 2);
+$total_due_coins = $principal + $return_coins;
 
+$matures_at = date("Y-m-d H:i:s", strtotime("+" . $maturity_days . " days"));
             ensureWallet($conn, $tenant_id, $seller_user_id);
 
             $sellerWalletStmt = $conn->prepare("
@@ -193,23 +207,48 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $updateSeller->execute();
             }
 
-            $updateClaim = $conn->prepare("
-                UPDATE auction_claims
-                SET status = 'active',
-                    approved_at = NOW(),
-                    approved_by = ?,
-                    matures_at = ?
-                WHERE id = ?
-                AND tenant_id = ?
-            ");
-            $updateClaim->bind_param(
-                "isii",
-                $admin_id,
-                $matures_at,
-                $claim_id,
-                $tenant_id
-            );
-            $updateClaim->execute();
+          $updateLotPackage = $conn->prepare("
+    UPDATE auction_lots
+    SET package_id = ?,
+        return_percent = ?,
+        maturity_days = ?,
+        updated_at = NOW()
+    WHERE id = ?
+    AND tenant_id = ?
+");
+$updateLotPackage->bind_param(
+    "idiii",
+    $current_package_id,
+    $return_percent,
+    $maturity_days,
+    $lot_id,
+    $tenant_id
+);
+$updateLotPackage->execute();
+
+$updateClaim = $conn->prepare("
+    UPDATE auction_claims
+    SET status = 'active',
+        return_percent = ?,
+        return_coins = ?,
+        total_due_coins = ?,
+        approved_at = NOW(),
+        approved_by = ?,
+        matures_at = ?
+    WHERE id = ?
+    AND tenant_id = ?
+");
+$updateClaim->bind_param(
+    "dddisii",
+    $return_percent,
+    $return_coins,
+    $total_due_coins,
+    $admin_id,
+    $matures_at,
+    $claim_id,
+    $tenant_id
+);
+$updateClaim->execute();
 
             if ($source_claim_id > 0) {
                 $markOriginalSold = $conn->prepare("
@@ -420,8 +459,12 @@ $totals = $totalsStmt->get_result()->fetch_assoc();
 
 $totalPendingRequests = (int)($totals["total_pending"] ?? 0);
 $totalPendingPrincipal = (float)($totals["pending_principal"] ?? 0);
-$totalPendingReturn = (float)($totals["pending_return"] ?? 0);
-$totalPendingDue = (float)($totals["pending_total_due"] ?? 0);
+
+/*
+    Summary cards must follow current Owner Package percentage.
+*/
+$totalPendingReturn = round(($totalPendingPrincipal * $current_return_percent) / 100, 2);
+$totalPendingDue = $totalPendingPrincipal + $totalPendingReturn;
 
 $listSql = "
     SELECT
@@ -687,16 +730,26 @@ $queryStringBase = http_build_query([
 
                                         <td><?php echo coins($p["principal_coins"]); ?></td>
 
-                                        <td>
-                                            <?php echo coins($p["return_coins"]); ?><br>
-                                            <small class="text-muted">
-                                                <?php echo number_format((float)$p["return_percent"], 2); ?>%
-                                            </small>
-                                        </td>
+                                     <?php
+    /*
+        Display using current Owner Package percentage.
+    */
+    $displayPrincipal = (float)$p["principal_coins"];
+    $displayReturnPercent = $current_return_percent;
+    $displayReturnCoins = round(($displayPrincipal * $displayReturnPercent) / 100, 2);
+    $displayTotalDue = $displayPrincipal + $displayReturnCoins;
+?>
 
-                                        <td>
-                                            <strong><?php echo coins($p["total_due_coins"]); ?></strong>
-                                        </td>
+<td>
+    <?php echo coins($displayReturnCoins); ?><br>
+    <small class="text-muted">
+        <?php echo number_format($displayReturnPercent, 2); ?>%
+    </small>
+</td>
+
+<td>
+    <strong><?php echo coins($displayTotalDue); ?></strong>
+</td>
 
                                         <td>
                                             <?php echo htmlspecialchars(displayDate($p["claimed_at"])); ?>
