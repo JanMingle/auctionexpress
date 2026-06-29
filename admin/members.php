@@ -224,7 +224,7 @@ $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" :
 $host = $_SERVER["HTTP_HOST"];
 $basePath = rtrim(dirname($_SERVER["SCRIPT_NAME"], 2), "/\\");
 
-$memberLink = $scheme . "://" . $host . $basePath . "/member_register.php?tenant=" . urlencode($tenant_code);
+$memberLink = $scheme . "://" . $host . $basePath . "/signup.php?tenant=" . urlencode($tenant_code);
 
 function memberDisplayName($member) {
     if (!empty($member["username"])) {

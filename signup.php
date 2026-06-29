@@ -127,9 +127,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $username = generateUsername($conn, $first_name, $member_code);
         $hashed_password = password_hash($password, PASSWORD_DEFAULT);
 
-        $role = "member";
-        $status = "pending";
-        $email = null;
+      $role = "member";
+$status = "active";
+$email = null;
 
         $stmt = $conn->prepare("
       INSERT INTO users 
@@ -167,8 +167,7 @@ $stmt->bind_param(
         if ($stmt->execute()) {
             $generated_username = $username;
             $generated_member_code = $member_code;
-            $success = "Your registration has been submitted. Please keep your login details below and wait for the stokvel admin to approve your account.";
-        } else {
+$success = "Your account has been created successfully. Please keep your login details below and login to continue.";        } else {
             $error = "Registration failed. Please try again.";
         }
     }
@@ -574,8 +573,7 @@ $stmt->bind_param(
                 </div>
 
                 <p class="copy-hint mb-0">
-                    Keep these details safe. Use either your member code or username to login after the admin approves your account.
-                </p>
+Keep these details safe. Use either your member code or username to login now.                </p>
             </div>
 
             <div class="text-center mt-3">
@@ -649,11 +647,11 @@ $stmt->bind_param(
                 </div>
 
                 <button type="submit" class="btn btn-stokvel w-100">
-                    Submit Member Registration
+                    Create Member Account
                 </button>
 
                 <div class="mini-note">
-                    Already approved?
+                    Already registered?
                     <a href="login.php" class="auth-link">Login here</a>
                 </div>
 

@@ -1,14 +1,8 @@
-# Do not upload local database config
-config/db.php
-
-# Do not upload uploaded user files
-uploads/
-
-# Logs/debug files
-*.log
-__debug_500.log
-__student_debug_500.log
-
-# Windows/Mac system files
-Thumbs.db
+.env
+db_local.php
+config_local.php
+vendor/
+node_modules/
 .DS_Store
+Thumbs.db
+*.log 

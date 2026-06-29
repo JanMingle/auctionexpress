@@ -4,6 +4,13 @@ require_once "config/db.php";
 
 $error = "";
 
+$stokvel_name = "";
+$first_name = "";
+$last_name = "";
+$email = "";
+$phone = "";
+$package_id = 0;
+
 function generateTenantCode($conn, $stokvelName) {
     do {
         $clean = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $stokvelName));
@@ -48,12 +55,34 @@ function generateOwnerUsername($conn, $firstName) {
     }
 }
 
+$packagesStmt = $conn->prepare("
+    SELECT 
+        id,
+        package_name,
+        package_type,
+        return_rate_percent,
+        maturity_days,
+        auction_return_percent,
+        auction_maturity_days
+    FROM packages
+    WHERE status = 'active'
+    ORDER BY 
+        CASE 
+            WHEN package_type = 'auction' THEN 1
+            ELSE 0
+        END,
+        package_name ASC
+");
+$packagesStmt->execute();
+$availablePackages = $packagesStmt->get_result();
+
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $stokvel_name = trim($_POST["stokvel_name"] ?? "");
     $first_name = trim($_POST["first_name"] ?? "");
     $last_name = trim($_POST["last_name"] ?? "");
     $email = trim($_POST["email"] ?? "");
     $phone = trim($_POST["phone"] ?? "");
+    $package_id = (int)($_POST["package_id"] ?? 0);
     $password = $_POST["password"] ?? "";
     $confirm_password = $_POST["confirm_password"] ?? "";
 
@@ -63,6 +92,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         empty($last_name) ||
         empty($email) ||
         empty($phone) ||
+        $package_id <= 0 ||
         empty($password) ||
         empty($confirm_password)
     ) {
@@ -82,85 +112,137 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         if ($result->num_rows > 0) {
             $error = "This email address is already registered.";
         } else {
-            $tenant_code = generateTenantCode($conn, $stokvel_name);
-            $owner_username = generateOwnerUsername($conn, $first_name);
-            $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-            $trial_ends_at = date("Y-m-d H:i:s", strtotime("+30 days"));
-            $role = "owner";
+            $packageCheck = $conn->prepare("
+                SELECT 
+                    id,
+                    package_name,
+                    package_type
+                FROM packages
+                WHERE id = ?
+                AND status = 'active'
+                LIMIT 1
+            ");
+            $packageCheck->bind_param("i", $package_id);
+            $packageCheck->execute();
+            $packageResult = $packageCheck->get_result();
+            $selectedPackage = $packageResult->fetch_assoc();
 
-            $conn->begin_transaction();
+            if (!$selectedPackage) {
+                $error = "Please choose a valid package.";
+            } else {
+                $tenant_code = generateTenantCode($conn, $stokvel_name);
+                $owner_username = generateOwnerUsername($conn, $first_name);
+                $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+                $trial_ends_at = date("Y-m-d H:i:s", strtotime("+30 days"));
+                $role = "owner";
 
-            try {
-                $tenantStmt = $conn->prepare("
-                    INSERT INTO tenants 
-                    (stokvel_name, tenant_code, subscription_status, trial_ends_at) 
-                    VALUES (?, ?, 'trial', ?)
-                ");
-                $tenantStmt->bind_param("sss", $stokvel_name, $tenant_code, $trial_ends_at);
-                $tenantStmt->execute();
+                $conn->begin_transaction();
 
-                $tenant_id = $conn->insert_id;
+                try {
+                    $tenantStmt = $conn->prepare("
+                        INSERT INTO tenants 
+                        (
+                            stokvel_name, 
+                            tenant_code, 
+                            package_id,
+                            subscription_status, 
+                            trial_ends_at
+                        ) 
+                        VALUES (?, ?, ?, 'trial', ?)
+                    ");
+                    $tenantStmt->bind_param(
+                        "ssis",
+                        $stokvel_name,
+                        $tenant_code,
+                        $package_id,
+                        $trial_ends_at
+                    );
+                    $tenantStmt->execute();
 
-                $userStmt = $conn->prepare("
-                    INSERT INTO users 
-                    (
-                        tenant_id,
-                        first_name,
-                        last_name,
-                        email,
-                        phone,
-                        username,
-                        member_code,
-                        password,
-                        role,
-                        status
-                    ) 
-                    VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, 'active')
-                ");
+                    $tenant_id = $conn->insert_id;
 
-                $userStmt->bind_param(
-                    "isssssss",
-                    $tenant_id,
-                    $first_name,
-                    $last_name,
-                    $email,
-                    $phone,
-                    $owner_username,
-                    $hashed_password,
-                    $role
-                );
+                    $userStmt = $conn->prepare("
+                        INSERT INTO users 
+                        (
+                            tenant_id,
+                            first_name,
+                            last_name,
+                            email,
+                            phone,
+                            username,
+                            member_code,
+                            password,
+                            role,
+                            status
+                        ) 
+                        VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, 'active')
+                    ");
 
-                $userStmt->execute();
+                    $userStmt->bind_param(
+                        "isssssss",
+                        $tenant_id,
+                        $first_name,
+                        $last_name,
+                        $email,
+                        $phone,
+                        $owner_username,
+                        $hashed_password,
+                        $role
+                    );
 
-                $user_id = $conn->insert_id;
+                    $userStmt->execute();
 
-                $updateTenant = $conn->prepare("
-                    UPDATE tenants 
-                    SET owner_user_id = ? 
-                    WHERE id = ?
-                ");
-                $updateTenant->bind_param("ii", $user_id, $tenant_id);
-                $updateTenant->execute();
+                    $user_id = $conn->insert_id;
 
-                $conn->commit();
+                    $updateTenant = $conn->prepare("
+                        UPDATE tenants 
+                        SET owner_user_id = ? 
+                        WHERE id = ?
+                    ");
+                    $updateTenant->bind_param("ii", $user_id, $tenant_id);
+                    $updateTenant->execute();
 
-                $_SESSION["user_id"] = $user_id;
-                $_SESSION["tenant_id"] = $tenant_id;
-                $_SESSION["role"] = $role;
-                $_SESSION["name"] = $first_name . " " . $last_name;
-                $_SESSION["stokvel_name"] = $stokvel_name;
-                $_SESSION["username"] = $owner_username;
-                $_SESSION["member_code"] = null;
+                    $conn->commit();
 
-                header("Location: admin/dashboard.php");
-                exit;
+                    $_SESSION["user_id"] = $user_id;
+                    $_SESSION["tenant_id"] = $tenant_id;
+                    $_SESSION["role"] = $role;
+                    $_SESSION["name"] = $first_name . " " . $last_name;
+                    $_SESSION["stokvel_name"] = $stokvel_name;
+                    $_SESSION["username"] = $owner_username;
+                    $_SESSION["member_code"] = null;
 
-            } catch (Exception $e) {
-                $conn->rollback();
-                $error = "Registration failed. Please try again.";
+                    header("Location: admin/dashboard.php");
+                    exit;
+
+                } catch (Exception $e) {
+                    $conn->rollback();
+                    $error = "Registration failed. Please try again.";
+                }
             }
         }
     }
+
+    $packagesStmt = $conn->prepare("
+        SELECT 
+            id,
+            package_name,
+            package_type,
+            return_rate_percent,
+            maturity_days,
+            auction_return_percent,
+            auction_maturity_days
+        FROM packages
+        WHERE status = 'active'
+        ORDER BY 
+            CASE 
+                WHEN package_type = 'auction' THEN 1
+                ELSE 0
+            END,
+            package_name ASC
+    ");
+    $packagesStmt->execute();
+    $availablePackages = $packagesStmt->get_result();
 }
 ?>
 
@@ -375,6 +457,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             box-shadow: 0 0 0 4px rgba(15,107,79,0.12);
         }
 
+        .package-help {
+            margin-top: 8px;
+            font-size: 12px;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
         .btn-stokvel {
             border: 0;
             border-radius: 18px;
@@ -453,7 +542,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         <h1 class="auth-title">Create your stokvel</h1>
         <p class="auth-subtitle">
-            Start a private savings circle, invite members with your link, track deposits, returns, withdrawals, and group conversations.
+            Start a private savings circle or auction circle, invite members with your link, and manage everything from one dashboard.
         </p>
 
         <?php if (!empty($error)): ?>
@@ -473,8 +562,48 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     name="stokvel_name" 
                     class="form-control" 
                     placeholder="Example: Friends Wealth Circle"
+                    value="<?php echo htmlspecialchars($stokvel_name); ?>"
                     required
                 >
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Package *</label>
+                <select name="package_id" class="form-control" required>
+                    <option value="">Choose package</option>
+
+                    <?php if ($availablePackages && $availablePackages->num_rows > 0): ?>
+                        <?php while ($pkg = $availablePackages->fetch_assoc()): ?>
+                            <?php
+                                $pkgType = $pkg["package_type"] ?? "savings";
+                                $isSelected = ((int)$pkg["id"] === (int)$package_id) ? "selected" : "";
+                            ?>
+
+                            <option value="<?php echo (int)$pkg["id"]; ?>" <?php echo $isSelected; ?>>
+                                <?php echo htmlspecialchars($pkg["package_name"]); ?>
+                                -
+                                <?php if ($pkgType === "auction"): ?>
+                                    Auction:
+                                    <?php echo number_format((float)$pkg["auction_return_percent"], 2); ?>%
+                                    in
+                                    <?php echo (int)$pkg["auction_maturity_days"]; ?>
+                                    days
+                                <?php else: ?>
+                                    Savings:
+                                    <?php echo number_format((float)$pkg["return_rate_percent"], 2); ?>%
+                                    in
+                                    <?php echo (int)$pkg["maturity_days"]; ?>
+                                    days
+                                <?php endif; ?>
+                            </option>
+                        <?php endwhile; ?>
+                    <?php endif; ?>
+                </select>
+
+                <div class="package-help">
+                    Savings packages will show savings, withdrawals and statements.
+                    Auction packages will show auction coin features only.
+                </div>
             </div>
 
             <div class="section-title">Owner details</div>
@@ -485,7 +614,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     <input 
                         type="text" 
                         name="first_name" 
-                        class="form-control" 
+                        class="form-control"
+                        value="<?php echo htmlspecialchars($first_name); ?>"
                         required
                     >
                 </div>
@@ -495,7 +625,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     <input 
                         type="text" 
                         name="last_name" 
-                        class="form-control" 
+                        class="form-control"
+                        value="<?php echo htmlspecialchars($last_name); ?>"
                         required
                     >
                 </div>
@@ -509,6 +640,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         name="email" 
                         class="form-control"
                         placeholder="owner@example.com"
+                        value="<?php echo htmlspecialchars($email); ?>"
                         required
                     >
                 </div>
@@ -520,6 +652,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         name="phone" 
                         class="form-control"
                         placeholder="0712345678"
+                        value="<?php echo htmlspecialchars($phone); ?>"
                         required
                     >
                 </div>
