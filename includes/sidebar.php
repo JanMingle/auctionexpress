@@ -101,16 +101,6 @@ $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ??
                 Admin Users
             </a>
 
-    <a href="<?php echo $appBase; ?>/admin/auction_pending_approval.php" class="sidebar-link <?php echo isActivePage('auction_pending_approval.php'); ?>">
-    <span class="sidebar-dot"></span>
-    Pending Approval
-</a>
-
-<a href="<?php echo $appBase; ?>/admin/auction_purchase_history.php" class="sidebar-link <?php echo isActivePage('auction_purchase_history.php'); ?>">
-    <span class="sidebar-dot"></span>
-    Auction History
-</a>
-
             <?php if ($isSavingsPackage): ?>
                 <a href="<?php echo $appBase; ?>/admin/savings_requests.php" class="sidebar-link <?php echo isActivePage('savings_requests.php'); ?>">
                     <span class="sidebar-dot"></span>
@@ -122,8 +112,6 @@ $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ??
                     Withdrawals
                 </a>
 
-                
-
                 <a href="<?php echo $appBase; ?>/admin/ledger.php" class="sidebar-link <?php echo isActivePage('ledger.php'); ?>">
                     <span class="sidebar-dot"></span>
                     Ledger
@@ -134,6 +122,16 @@ $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ??
                 <a href="<?php echo $appBase; ?>/admin/auction.php" class="sidebar-link <?php echo isActivePage('auction.php'); ?>">
                     <span class="sidebar-dot"></span>
                     Auction
+                </a>
+
+                <a href="<?php echo $appBase; ?>/admin/auction_pending_approval.php" class="sidebar-link <?php echo isActivePage('auction_pending_approval.php'); ?>">
+                    <span class="sidebar-dot"></span>
+                    Pending Approval
+                </a>
+
+                <a href="<?php echo $appBase; ?>/admin/auction_purchase_history.php" class="sidebar-link <?php echo isActivePage('auction_purchase_history.php'); ?>">
+                    <span class="sidebar-dot"></span>
+                    Auction History
                 </a>
             <?php endif; ?>
 
@@ -191,20 +189,27 @@ $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ??
                 <?php endif; ?>
             <?php endif; ?>
 
-       <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction.php" class="sidebar-link <?php echo isActivePage('auction.php'); ?>">
-    <span class="sidebar-dot"></span>
-    Auction 
-</a>
+            <?php if ($isAuctionPackage): ?>
+                <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction.php" class="sidebar-link <?php echo isActivePage('auction.php'); ?>">
+                    <span class="sidebar-dot"></span>
+                    Auction
+                </a>
 
-<a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction_pending_approval.php" class="sidebar-link <?php echo isActivePage('auction_pending_approval.php'); ?>">
-    <span class="sidebar-dot"></span>
-    Pending Approval
-</a>
+                <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction_pending_approval.php" class="sidebar-link <?php echo isActivePage('auction_pending_approval.php'); ?>">
+                    <span class="sidebar-dot"></span>
+                    Pending Approval
+                </a>
 
-<a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction_purchases.php" class="sidebar-link <?php echo isActivePage('auction_purchases.php'); ?>">
-    <span class="sidebar-dot"></span>
-    My Coin Purchases
-</a>
+                <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction_purchases.php" class="sidebar-link <?php echo isActivePage('auction_purchases.php'); ?>">
+                    <span class="sidebar-dot"></span>
+                    My Coin Purchases
+                </a>
+
+                <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction_history.php" class="sidebar-link <?php echo isActivePage('auction_history.php'); ?>">
+                    <span class="sidebar-dot"></span>
+                    Auction History
+                </a>
+            <?php endif; ?>
 
             <?php if ($showGroupChat): ?>
                 <a href="<?php echo $appBase; ?>/group_chat.php" class="sidebar-link <?php echo isActivePage('group_chat.php'); ?>">
