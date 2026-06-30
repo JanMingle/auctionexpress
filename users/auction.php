@@ -56,28 +56,6 @@ function auctionMoney($amount) {
     return "R" . number_format((float)$amount, 2);
 }
 
-function bankingDisplay($value) {
-    $value = trim((string)$value);
-
-    if ($value === "") {
-        return '<span class="text-muted">Not provided</span>';
-    }
-
-    return htmlspecialchars($value);
-}
-
-function maskBankAccount($accountNumber) {
-    $accountNumber = trim((string)$accountNumber);
-
-    if ($accountNumber === "") {
-        return '<span class="text-muted">Not provided</span>';
-    }
-
-    $lastFour = substr($accountNumber, -4);
-
-    return "•••• •••• " . htmlspecialchars($lastFour);
-}
-
 auctionEnsureWallet($conn, $tenant_id, $user_id);
 auctionProcessMaturedPurchases($conn, $tenant_id, $user_id);
 
@@ -164,15 +142,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                 $newRemaining = round($remaining_coins - $buy_amount, 2);
 
-                /*
-                    Split rule:
-                    Buyer can buy all, or split only if the remainder is at least 200.
-                    Example:
-                    500 available:
-                    - buy 200 leaves 300 = allowed
-                    - buy 500 leaves 0 = allowed
-                    - buy 350 leaves 150 = blocked
-                */
                 if ($newRemaining > 0 && $newRemaining < $minBuyCoins) {
                     throw new Exception("You cannot split this lot and leave less than " . number_format($minBuyCoins, 2) . " shares. Please buy all or leave at least " . number_format($minBuyCoins, 2) . " shares.");
                 }
@@ -264,7 +233,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 );
 
                 $conn->commit();
-                $success = "Share purchase submitted successfully. Please pay the seller using the banking details shown.";
+                $success = "Share purchase submitted successfully.";
             } catch (Throwable $e) {
                 $conn->rollback();
                 $error = $e->getMessage();
@@ -344,20 +313,8 @@ if ($auctionStatus === "open") {
             auction_lots.remaining_coins,
             auction_lots.return_percent,
             auction_lots.maturity_days,
-            packages.package_name,
-
-            users.first_name,
-            users.last_name,
-            users.username,
-            users.member_code,
-            users.bank_name,
-            users.bank_account_holder,
-            users.bank_account_number,
-            users.bank_branch_code,
-            users.bank_account_type,
-            users.banking_details_completed
+            users.bank_name
         FROM auction_lots
-        INNER JOIN packages ON packages.id = auction_lots.package_id
         INNER JOIN users ON users.id = auction_lots.seller_user_id
         WHERE auction_lots.tenant_id = ?
         AND auction_lots.status = 'open'
@@ -392,22 +349,23 @@ if ($auctionStatus === "open") {
     <style>
         body {
             background:
-                radial-gradient(circle at 20% 0%, rgba(69, 90, 145, 0.22), transparent 34%),
-                radial-gradient(circle at 90% 10%, rgba(168, 59, 216, 0.12), transparent 30%),
+                radial-gradient(circle at 20% 0%, rgba(69, 90, 145, 0.18), transparent 34%),
+                radial-gradient(circle at 90% 10%, rgba(168, 59, 216, 0.10), transparent 30%),
                 linear-gradient(180deg, #0d1829 0%, #101a2c 50%, #0b1424 100%) !important;
-            color: rgba(255,255,255,0.86);
+            color: rgba(255,255,255,0.82);
+            font-size: 12px;
         }
 
         .app-main {
             background:
-                radial-gradient(circle at 85% 5%, rgba(168, 59, 216, 0.12), transparent 30%),
+                radial-gradient(circle at 85% 5%, rgba(168, 59, 216, 0.10), transparent 30%),
                 linear-gradient(180deg, #0d1829 0%, #101a2c 100%) !important;
         }
 
         .app-topbar {
             background:
                 linear-gradient(rgba(13,24,41,0.84), rgba(13,24,41,0.90)),
-                radial-gradient(circle at top right, rgba(59,130,246,0.16), transparent 34%) !important;
+                radial-gradient(circle at top right, rgba(59,130,246,0.12), transparent 34%) !important;
             border-bottom: 1px solid rgba(255,255,255,0.06) !important;
             color: #ffffff;
         }
@@ -417,7 +375,17 @@ if ($auctionStatus === "open") {
         .topbar-title,
         .topbar-subtitle,
         .topbar-user {
-            color: rgba(255,255,255,0.88) !important;
+            color: rgba(255,255,255,0.84) !important;
+        }
+
+        .topbar-title,
+        .app-topbar-title {
+            font-size: 14px !important;
+        }
+
+        .topbar-subtitle,
+        .app-topbar-subtitle {
+            font-size: 11px !important;
         }
 
         .app-content::before {
@@ -425,27 +393,27 @@ if ($auctionStatus === "open") {
         }
 
         .auction-shell {
-            max-width: 1180px;
+            max-width: 980px;
             margin: 0 auto;
         }
 
         .auction-page-title {
-            font-size: 30px;
+            font-size: 22px;
             font-weight: 400;
-            color: rgba(255,255,255,0.72);
-            margin-bottom: 20px;
+            color: rgba(255,255,255,0.66);
+            margin-bottom: 14px;
         }
 
         .auction-cover {
-            min-height: 118px;
+            min-height: 82px;
             border-radius: 4px;
             background:
                 linear-gradient(rgba(13,24,41,0.70), rgba(13,24,41,0.94)),
-                radial-gradient(circle at right top, rgba(16,185,129,0.14), transparent 30%),
+                radial-gradient(circle at right top, rgba(16,185,129,0.10), transparent 30%),
                 linear-gradient(135deg, #162239, #0d1829);
             border: 1px solid rgba(255,255,255,0.06);
-            margin-bottom: 22px;
-            padding: 22px;
+            margin-bottom: 16px;
+            padding: 16px;
             position: relative;
             overflow: hidden;
         }
@@ -453,111 +421,45 @@ if ($auctionStatus === "open") {
         .auction-cover::after {
             content: "";
             position: absolute;
-            right: 28px;
-            top: 22px;
-            width: 46px;
-            height: 32px;
-            border-top: 4px solid rgba(255,255,255,0.35);
-            border-bottom: 4px solid rgba(255,255,255,0.35);
-        }
-
-        .online-banner {
-            background: linear-gradient(135deg, #ff9800, #ff7a00);
-            color: #ffffff;
-            border-radius: 5px;
-            padding: 18px 22px;
-            font-size: 18px;
-            margin-bottom: 22px;
-            box-shadow: 0 18px 35px rgba(255,122,0,0.16);
+            right: 20px;
+            top: 18px;
+            width: 34px;
+            height: 24px;
+            border-top: 3px solid rgba(255,255,255,0.26);
+            border-bottom: 3px solid rgba(255,255,255,0.26);
         }
 
         .auction-status-panel {
             background: rgba(22, 34, 57, 0.78);
             border: 1px solid rgba(255,255,255,0.05);
             border-radius: 5px;
-            padding: 24px;
-            margin-bottom: 24px;
+            padding: 18px;
+            margin-bottom: 18px;
         }
 
         .auction-status-title {
-            font-size: 30px;
+            font-size: 19px;
             font-weight: 300;
             color: rgba(255,255,255,0.62);
-            margin-bottom: 6px;
+            margin-bottom: 5px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
         }
 
         .auction-status-subtitle {
-            color: rgba(255,255,255,0.35);
-            font-size: 16px;
-            margin-bottom: 20px;
+            color: rgba(255,255,255,0.34);
+            font-size: 12px;
+            margin-bottom: 14px;
         }
 
         .auction-countdown-row {
             display: flex;
             align-items: center;
-            gap: 18px;
-            color: rgba(255,255,255,0.72);
-            font-size: 17px;
-        }
-
-        .auction-summary-grid {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 18px;
-            margin-bottom: 24px;
-        }
-
-        .summary-card {
-            background: rgba(25, 39, 64, 0.86);
-            border: 1px solid rgba(255,255,255,0.045);
-            border-radius: 5px;
-            padding: 20px;
-            box-shadow: 0 24px 42px rgba(0,0,0,0.16);
-        }
-
-        .summary-label {
-            color: rgba(255,255,255,0.44);
-            font-size: 13px;
-            margin-bottom: 8px;
-        }
-
-        .summary-value {
-            color: rgba(255,255,255,0.76);
-            font-size: 26px;
-            font-weight: 300;
-        }
-
-        .tasks-card {
-            background: linear-gradient(135deg, #ff9800, #ff7a00);
-            border-radius: 5px;
-            padding: 22px 24px;
-            color: #ffffff;
-            margin-bottom: 28px;
-            box-shadow: 0 18px 36px rgba(255,122,0,0.18);
-        }
-
-        .tasks-title {
-            color: rgba(255,255,255,0.70);
-            font-size: 18px;
-            margin-bottom: 12px;
-        }
-
-        .tasks-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 12px;
-            color: #ffffff;
-            text-decoration: none;
-            font-weight: 900;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-        }
-
-        .buy-section-title {
-            color: rgba(255,255,255,0.46);
-            font-size: 20px;
-            font-weight: 400;
-            margin: 0 0 18px;
+            gap: 10px;
+            color: rgba(255,255,255,0.68);
+            font-size: 12px;
         }
 
         .refresh-button {
@@ -565,22 +467,84 @@ if ($auctionStatus === "open") {
             color: #ffffff;
             border: 0;
             border-radius: 5px;
-            padding: 14px 28px;
-            font-weight: 900;
+            padding: 9px 16px;
+            font-size: 11px;
+            font-weight: 800;
             text-decoration: none;
+        }
+
+        .auction-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+
+        .summary-card {
+            background: rgba(25, 39, 64, 0.86);
+            border: 1px solid rgba(255,255,255,0.045);
+            border-radius: 5px;
+            padding: 14px;
+            box-shadow: 0 18px 32px rgba(0,0,0,0.12);
+        }
+
+        .summary-label {
+            color: rgba(255,255,255,0.40);
+            font-size: 10px;
+            margin-bottom: 5px;
+        }
+
+        .summary-value {
+            color: rgba(255,255,255,0.72);
+            font-size: 17px;
+            font-weight: 300;
+        }
+
+        .tasks-card {
+            background: linear-gradient(135deg, #ff9800, #ff7a00);
+            border-radius: 5px;
+            padding: 15px 18px;
+            color: #ffffff;
+            margin-bottom: 20px;
+            box-shadow: 0 14px 28px rgba(255,122,0,0.14);
+        }
+
+        .tasks-title {
+            color: rgba(255,255,255,0.70);
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .tasks-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 9px;
+            color: #ffffff;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .buy-section-title {
+            color: rgba(255,255,255,0.46);
+            font-size: 15px;
+            font-weight: 400;
+            margin: 0 0 14px;
         }
 
         .lot-list {
             display: grid;
-            gap: 26px;
+            gap: 16px;
         }
 
         .share-card {
             background: rgba(25, 39, 64, 0.86);
             border: 1px solid rgba(255,255,255,0.045);
             border-radius: 5px;
-            padding: 28px;
-            box-shadow: 0 24px 42px rgba(0,0,0,0.16);
+            padding: 18px;
+            box-shadow: 0 18px 34px rgba(0,0,0,0.14);
             position: relative;
             overflow: hidden;
         }
@@ -591,35 +555,35 @@ if ($auctionStatus === "open") {
             left: 0;
             top: 0;
             bottom: 0;
-            width: 4px;
+            width: 3px;
             background: linear-gradient(180deg, #a83bd8, #11a7d8);
             opacity: 0.9;
         }
 
         .bid-number {
             color: rgba(255,255,255,0.50);
-            font-size: 34px;
+            font-size: 21px;
             font-weight: 300;
-            margin-bottom: 18px;
+            margin-bottom: 12px;
         }
 
         .bank-line {
             color: rgba(255,255,255,0.52);
-            font-size: 30px;
+            font-size: 18px;
             font-weight: 300;
-            margin-bottom: 22px;
+            margin-bottom: 16px;
         }
 
         .share-amount-row {
             display: flex;
             align-items: center;
-            gap: 18px;
-            margin-bottom: 12px;
+            gap: 12px;
+            margin-bottom: 10px;
         }
 
         .share-number {
             color: rgba(255,255,255,0.58);
-            font-size: 58px;
+            font-size: 36px;
             font-weight: 300;
             line-height: 1;
         }
@@ -628,48 +592,23 @@ if ($auctionStatus === "open") {
             background: linear-gradient(135deg, #32b96e, #1b9e5f);
             color: #ffffff;
             border-radius: 5px;
-            padding: 18px 20px;
-            min-width: 92px;
+            padding: 11px 13px;
+            min-width: 68px;
             text-align: center;
+            font-size: 11px;
             font-weight: 800;
         }
 
         .going-price {
             color: rgba(255,255,255,0.38);
-            font-size: 19px;
-            margin-bottom: 28px;
-        }
-
-        .seller-details-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 12px;
-            margin-bottom: 24px;
-        }
-
-        .seller-detail {
-            background: rgba(13,24,41,0.58);
-            border: 1px solid rgba(255,255,255,0.055);
-            border-radius: 5px;
-            padding: 13px 14px;
-        }
-
-        .seller-detail-label {
-            color: rgba(255,255,255,0.34);
-            font-size: 12px;
-            margin-bottom: 4px;
-        }
-
-        .seller-detail-value {
-            color: rgba(255,255,255,0.72);
-            font-size: 14px;
-            font-weight: 700;
+            font-size: 13px;
+            margin-bottom: 18px;
         }
 
         .bid-period {
-            color: rgba(255,255,255,0.76);
-            font-size: 17px;
-            margin-bottom: 10px;
+            color: rgba(255,255,255,0.72);
+            font-size: 12px;
+            margin-bottom: 8px;
             font-weight: 800;
         }
 
@@ -677,29 +616,30 @@ if ($auctionStatus === "open") {
             background: rgba(255,255,255,0.045);
             border: 1px solid rgba(255,255,255,0.075);
             border-radius: 5px;
-            padding: 13px 14px;
-            color: rgba(255,255,255,0.62);
-            margin-bottom: 16px;
+            padding: 10px 11px;
+            color: rgba(255,255,255,0.58);
+            margin-bottom: 12px;
+            font-size: 11px;
         }
 
         .buy-input {
             background: rgba(13,24,41,0.72) !important;
-            border: 1px solid rgba(255,255,255,0.35) !important;
+            border: 1px solid rgba(255,255,255,0.30) !important;
             color: rgba(255,255,255,0.86) !important;
             border-radius: 5px !important;
-            padding: 16px !important;
-            font-size: 17px;
+            padding: 12px !important;
+            font-size: 12px !important;
         }
 
         .buy-input::placeholder {
-            color: rgba(255,255,255,0.38);
+            color: rgba(255,255,255,0.36);
         }
 
         .buy-actions {
             display: flex;
             flex-wrap: wrap;
-            gap: 12px;
-            margin-top: 12px;
+            gap: 9px;
+            margin-top: 10px;
         }
 
         .btn-buy-share {
@@ -707,27 +647,29 @@ if ($auctionStatus === "open") {
             border: 0;
             color: #ffffff;
             border-radius: 999px;
-            padding: 14px 28px;
-            min-width: 180px;
+            padding: 10px 20px;
+            min-width: 130px;
+            font-size: 11px;
             font-weight: 900;
             text-transform: uppercase;
-            box-shadow: 0 18px 32px rgba(26,188,156,0.18);
+            box-shadow: 0 14px 24px rgba(26,188,156,0.16);
         }
 
         .btn-buy-all {
             background: rgba(255,255,255,0.045);
             border: 1px solid rgba(255,255,255,0.13);
-            color: rgba(255,255,255,0.78);
+            color: rgba(255,255,255,0.76);
             border-radius: 999px;
-            padding: 14px 22px;
+            padding: 10px 16px;
+            font-size: 11px;
             font-weight: 900;
         }
 
         .split-note {
-            color: rgba(255,255,255,0.36);
-            font-size: 13px;
-            margin-top: 12px;
-            line-height: 1.5;
+            color: rgba(255,255,255,0.34);
+            font-size: 10px;
+            margin-top: 9px;
+            line-height: 1.45;
         }
 
         .own-card-note {
@@ -735,10 +677,10 @@ if ($auctionStatus === "open") {
             border: 1px solid rgba(255,152,0,0.20);
             color: #ffb74d;
             border-radius: 5px;
-            padding: 13px 14px;
-            font-size: 13px;
+            padding: 10px 11px;
+            font-size: 11px;
             font-weight: 800;
-            margin-top: 16px;
+            margin-top: 12px;
         }
 
         .closed-info-card,
@@ -746,13 +688,16 @@ if ($auctionStatus === "open") {
             background: rgba(25, 39, 64, 0.86);
             border: 1px solid rgba(255,255,255,0.045);
             border-radius: 5px;
-            padding: 28px;
+            padding: 20px;
             color: rgba(255,255,255,0.46);
             text-align: center;
+            font-size: 12px;
         }
 
         .alert {
             border-radius: 5px;
+            font-size: 12px;
+            padding: 10px 12px;
         }
 
         @media (max-width: 900px) {
@@ -760,20 +705,20 @@ if ($auctionStatus === "open") {
                 grid-template-columns: 1fr;
             }
 
-            .seller-details-grid {
-                grid-template-columns: 1fr;
-            }
-
             .share-number {
-                font-size: 48px;
+                font-size: 32px;
             }
 
             .bank-line {
-                font-size: 25px;
+                font-size: 16px;
             }
 
             .bid-number {
-                font-size: 30px;
+                font-size: 19px;
+            }
+
+            .auction-status-title {
+                font-size: 17px;
             }
         }
     </style>
@@ -803,7 +748,7 @@ if ($auctionStatus === "open") {
                 </div>
 
                 <div class="auction-cover">
-                    <div style="color: rgba(255,255,255,0.42); font-size: 13px;">
+                    <div style="color: rgba(255,255,255,0.40); font-size: 11px;">
                         <?php echo htmlspecialchars($stokvel_name); ?>
                     </div>
                 </div>
@@ -818,18 +763,18 @@ if ($auctionStatus === "open") {
 
                 <?php if ($hasPendingBuyerPurchase): ?>
                     <div class="alert alert-warning">
-                        You already have a share purchase waiting for seller approval. You can buy again after the seller approves or rejects it.
+                        You already have a share purchase waiting for seller approval.
                     </div>
                 <?php endif; ?>
 
                 <div class="auction-status-panel">
                     <div class="auction-status-title">
                         Auction is <?php echo ucfirst(htmlspecialchars($auctionStatus)); ?>
-                        <a href="auction.php" class="refresh-button ms-3">Refresh</a>
+                        <a href="auction.php" class="refresh-button">Refresh</a>
                     </div>
 
                     <div class="auction-status-subtitle">
-                        Auctions run daily at 10:00 and 17:00. Bid period is fixed at <?php echo (int)$fixedBidPeriodDays; ?> days.
+                        Bid period: <?php echo (int)$fixedBidPeriodDays; ?> days.
                     </div>
 
                     <?php if ($auctionStatus !== "open"): ?>
@@ -868,7 +813,7 @@ if ($auctionStatus === "open") {
                     </a>
                 </div>
 
-                <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3" id="buyShares">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3" id="buyShares">
                     <h3 class="buy-section-title mb-0">Buy Shares</h3>
 
                     <a href="auction.php" class="refresh-button">
@@ -878,7 +823,7 @@ if ($auctionStatus === "open") {
 
                 <?php if ($auctionStatus !== "open"): ?>
                     <div class="closed-info-card">
-                        The auction is currently closed. When it opens, members selling shares will appear here.
+                        The auction is currently closed.
                         <br>
                         Next auction: <?php echo htmlspecialchars($nextOpen["label"]); ?>
                     </div>
@@ -893,17 +838,10 @@ if ($auctionStatus === "open") {
                                     $remaining = (float)$lot["remaining_coins"];
                                     $isOwnCoins = $sellerUserId === $user_id;
 
-                                    $memberCodeText = trim($lot["member_code"] ?? "");
-                                    if ($memberCodeText === "") {
-                                        $memberCodeText = "N/A";
-                                    }
-
                                     $bankName = trim($lot["bank_name"] ?? "");
-                                    $accountHolder = trim($lot["bank_account_holder"] ?? "");
-                                    $accountNumber = trim($lot["bank_account_number"] ?? "");
-                                    $branchCode = trim($lot["bank_branch_code"] ?? "");
-                                    $accountType = trim($lot["bank_account_type"] ?? "");
-                                    $bankingDone = (int)($lot["banking_details_completed"] ?? 0);
+                                    if ($bankName === "") {
+                                        $bankName = "Bank not provided";
+                                    }
 
                                     $canBuy = !$isOwnCoins
                                         && !$hasPendingBuyerPurchase
@@ -919,7 +857,7 @@ if ($auctionStatus === "open") {
                                     </div>
 
                                     <div class="bank-line">
-                                        Banking with <?php echo htmlspecialchars($bankName !== "" ? $bankName : "not provided"); ?>
+                                        Banking with <?php echo htmlspecialchars($bankName); ?>
                                     </div>
 
                                     <div class="share-amount-row">
@@ -935,56 +873,6 @@ if ($auctionStatus === "open") {
                                     <div class="going-price">
                                         Going Price <?php echo auctionMoney($remaining); ?>
                                     </div>
-
-                                    <div class="seller-details-grid">
-                                        <div class="seller-detail">
-                                            <div class="seller-detail-label">Member Code</div>
-                                            <div class="seller-detail-value">
-                                                <?php echo htmlspecialchars($memberCodeText); ?>
-                                            </div>
-                                        </div>
-
-                                        <div class="seller-detail">
-                                            <div class="seller-detail-label">Bid Period</div>
-                                            <div class="seller-detail-value">
-                                                <?php echo (int)$fixedBidPeriodDays; ?> days
-                                            </div>
-                                        </div>
-
-                                        <div class="seller-detail">
-                                            <div class="seller-detail-label">Bank</div>
-                                            <div class="seller-detail-value">
-                                                <?php echo bankingDisplay($bankName); ?>
-                                            </div>
-                                        </div>
-
-                                        <div class="seller-detail">
-                                            <div class="seller-detail-label">Account Holder</div>
-                                            <div class="seller-detail-value">
-                                                <?php echo bankingDisplay($accountHolder); ?>
-                                            </div>
-                                        </div>
-
-                                        <div class="seller-detail">
-                                            <div class="seller-detail-label">Account Number</div>
-                                            <div class="seller-detail-value">
-                                                <?php echo maskBankAccount($accountNumber); ?>
-                                            </div>
-                                        </div>
-
-                                        <div class="seller-detail">
-                                            <div class="seller-detail-label">Branch Code / Type</div>
-                                            <div class="seller-detail-value">
-                                                <?php echo bankingDisplay($branchCode); ?> · <?php echo bankingDisplay($accountType); ?>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <?php if ($bankingDone !== 1 && !$isOwnCoins): ?>
-                                        <div class="alert alert-warning">
-                                            This seller has not completed banking details.
-                                        </div>
-                                    <?php endif; ?>
 
                                     <?php if ($isOwnCoins): ?>
                                         <div class="own-card-note">
@@ -1043,7 +931,6 @@ if ($auctionStatus === "open") {
                                             <div class="split-note">
                                                 Minimum purchase is <?php echo number_format($minBuyCoins, 2); ?> shares.
                                                 If you split, the remaining shares must also be at least <?php echo number_format($minBuyCoins, 2); ?>.
-                                                Buying all is allowed.
                                             </div>
                                         </form>
                                     <?php endif; ?>
