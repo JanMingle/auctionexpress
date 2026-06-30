@@ -740,3 +740,346 @@ body {
         padding: 18px !important;
     }
 }
+
+/* =========================
+   Crypto Style Sidebar Upgrade
+========================= */
+
+:root {
+    --crypto-bg: #111827;
+    --crypto-bg-2: #172033;
+    --crypto-bg-3: #0b1020;
+    --crypto-purple: #a83bd8;
+    --crypto-purple-2: #c447f0;
+    --crypto-text: rgba(255,255,255,0.86);
+    --crypto-muted: rgba(255,255,255,0.48);
+    --crypto-line: rgba(255,255,255,0.08);
+}
+
+.app-sidebar.crypto-sidebar {
+    width: 292px;
+    background:
+        linear-gradient(rgba(13, 19, 34, 0.88), rgba(13, 19, 34, 0.94)),
+        radial-gradient(circle at top left, rgba(168, 59, 216, 0.32), transparent 34%),
+        radial-gradient(circle at bottom right, rgba(24, 69, 116, 0.35), transparent 38%),
+        linear-gradient(180deg, var(--crypto-bg-2), var(--crypto-bg-3)) !important;
+    color: #ffffff;
+    padding: 18px 14px 20px;
+    box-shadow: 28px 0 80px rgba(0, 0, 0, 0.38);
+    border-right: 1px solid rgba(255,255,255,0.06);
+}
+
+.app-main {
+    margin-left: 292px;
+}
+
+.sidebar-close-row {
+    display: none;
+}
+
+.crypto-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: transparent !important;
+    border: 0 !important;
+    padding: 16px 14px 20px !important;
+    margin-bottom: 8px !important;
+    border-radius: 0 !important;
+}
+
+.crypto-brand-mark {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: #241000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 950;
+    font-size: 20px;
+    box-shadow: 0 14px 28px rgba(245, 158, 11, 0.22);
+}
+
+.app-sidebar .app-brand-title {
+    font-size: 17px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    color: rgba(255,255,255,0.92);
+    margin-bottom: 4px;
+}
+
+.app-sidebar .app-brand-subtitle {
+    font-size: 12px;
+    color: var(--crypto-muted);
+    font-weight: 700;
+}
+
+.sidebar-account-card {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    margin: 0 6px 22px;
+    padding: 14px;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.045);
+    border: 1px solid var(--crypto-line);
+}
+
+.sidebar-account-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.10);
+    border: 1px solid rgba(255,255,255,0.10);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
+}
+
+.sidebar-account-label {
+    font-size: 12px;
+    color: var(--crypto-muted);
+    margin-bottom: 2px;
+}
+
+.sidebar-account-name {
+    font-size: 14px;
+    color: #ffffff;
+    font-weight: 850;
+    line-height: 1.1;
+}
+
+.sidebar-account-role {
+    font-size: 11px;
+    color: rgba(255,255,255,0.38);
+    margin-top: 3px;
+}
+
+.app-sidebar .sidebar-section {
+    margin-bottom: 18px;
+}
+
+.app-sidebar .sidebar-section-title {
+    color: rgba(255,255,255,0.38);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    padding-left: 18px;
+    margin-bottom: 10px;
+}
+
+.app-sidebar .sidebar-link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    min-height: 54px;
+    color: var(--crypto-text);
+    text-decoration: none;
+    font-size: 15px;
+    font-weight: 650;
+    padding: 13px 16px;
+    margin: 0 6px 8px;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.app-sidebar .sidebar-link:hover {
+    background: rgba(255,255,255,0.07);
+    color: #ffffff;
+    transform: translateX(3px);
+}
+
+.app-sidebar .sidebar-link.active {
+    background: linear-gradient(135deg, var(--crypto-purple), var(--crypto-purple-2)) !important;
+    color: #ffffff !important;
+    font-weight: 850;
+    box-shadow: 0 18px 34px rgba(168, 59, 216, 0.34);
+    border-color: rgba(255,255,255,0.12);
+    transform: none;
+}
+
+.app-sidebar .sidebar-link.active::before {
+    content: "";
+    position: absolute;
+    left: -6px;
+    top: 12px;
+    bottom: 12px;
+    width: 4px;
+    border-radius: 999px;
+    background: #ffffff;
+    opacity: 0.85;
+}
+
+.sidebar-icon {
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.78);
+    font-size: 18px;
+    line-height: 1;
+}
+
+.app-sidebar .sidebar-link.active .sidebar-icon {
+    color: #ffffff;
+}
+
+.sidebar-label {
+    display: inline-block;
+    line-height: 1.1;
+}
+
+.app-sidebar .sidebar-dot {
+    display: none !important;
+}
+
+.app-sidebar .sidebar-footer {
+    margin: 18px 6px 0;
+    padding-top: 14px;
+    border-top: 1px solid var(--crypto-line);
+}
+
+.app-sidebar::-webkit-scrollbar {
+    width: 7px;
+}
+
+.app-sidebar::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.16);
+    border-radius: 999px;
+}
+
+.app-sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* =========================
+   Crypto Mobile Sidebar
+========================= */
+
+.mobile-menu-button {
+    display: none;
+}
+
+.sidebar-backdrop {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    body.sidebar-open {
+        overflow: hidden;
+    }
+
+    .mobile-menu-button {
+        position: fixed;
+        top: 14px;
+        left: 14px;
+        z-index: 1200;
+        width: 46px;
+        height: 46px;
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 12px;
+        background: linear-gradient(135deg, #111827, #172033);
+        box-shadow: 0 14px 34px rgba(0,0,0,0.34);
+        display: inline-flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 5px;
+        padding: 0;
+    }
+
+    .mobile-menu-button span {
+        width: 20px;
+        height: 2px;
+        border-radius: 999px;
+        background: #ffffff;
+        display: block;
+        transition: all 0.2s ease;
+    }
+
+    body.sidebar-open .mobile-menu-button span:nth-child(1) {
+        transform: translateY(7px) rotate(45deg);
+    }
+
+    body.sidebar-open .mobile-menu-button span:nth-child(2) {
+        opacity: 0;
+    }
+
+    body.sidebar-open .mobile-menu-button span:nth-child(3) {
+        transform: translateY(-7px) rotate(-45deg);
+    }
+
+    .sidebar-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(5, 9, 20, 0.62);
+        backdrop-filter: blur(3px);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+        z-index: 998;
+    }
+
+    body.sidebar-open .sidebar-backdrop {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .app-sidebar.crypto-sidebar {
+        position: fixed !important;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 292px !important;
+        height: 100vh !important;
+        transform: translateX(-110%);
+        transition: transform 0.25s ease;
+        z-index: 1000;
+        border-radius: 0;
+        box-shadow: 28px 0 80px rgba(0,0,0,0.45);
+    }
+
+    body.sidebar-open .app-sidebar.crypto-sidebar {
+        transform: translateX(0);
+    }
+
+    .sidebar-close-row {
+        display: flex;
+        justify-content: flex-start;
+        padding: 2px 6px 8px;
+    }
+
+    .sidebar-close-btn {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        border: 0;
+        background: rgba(255,255,255,0.06);
+        color: rgba(255,255,255,0.78);
+        font-size: 30px;
+        line-height: 1;
+    }
+
+    .app-main {
+        margin-left: 0 !important;
+    }
+
+    .app-topbar {
+        padding-left: 76px !important;
+        min-height: 74px;
+    }
+
+    .app-content {
+        padding: 18px !important;
+    }
+}

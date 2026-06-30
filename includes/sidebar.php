@@ -33,6 +33,19 @@ if (!function_exists("isActivePage")) {
     }
 }
 
+if (!function_exists("sidebarLink")) {
+    function sidebarLink($href, $fileName, $label, $icon) {
+        $active = isActivePage($fileName);
+
+        echo '
+            <a href="' . htmlspecialchars($href) . '" class="sidebar-link ' . htmlspecialchars($active) . '">
+                <span class="sidebar-icon">' . $icon . '</span>
+                <span class="sidebar-label">' . htmlspecialchars($label) . '</span>
+            </a>
+        ';
+    }
+}
+
 $tenant_id = (int)($_SESSION["tenant_id"] ?? 0);
 
 $packageRules = [
@@ -57,6 +70,9 @@ $isSavingsPackage = !$isAuctionPackage;
 
 $showGroupChat = (int)($packageRules["enable_group_chat"] ?? 1) === 1;
 $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ?? 0) === 1;
+
+$sidebarTitle = $isAuctionPackage ? "CRYPTO SHARES" : "STOKVEL CIRCLE";
+$sidebarMode = $isAuctionPackage ? "Auction Package" : "Savings Package";
 ?>
 
 <button type="button" class="mobile-menu-button" onclick="toggleSidebar()" aria-label="Open menu">
@@ -67,15 +83,43 @@ $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ??
 
 <div class="sidebar-backdrop" onclick="closeSidebar()"></div>
 
-<aside class="app-sidebar" id="appSidebar">
+<aside class="app-sidebar crypto-sidebar" id="appSidebar">
 
-    <div class="app-brand">
-        <div class="app-brand-title">
-            <?php echo htmlspecialchars($stokvelName); ?>
+    <div class="sidebar-close-row">
+        <button type="button" class="sidebar-close-btn" onclick="closeSidebar()" aria-label="Close menu">
+            ×
+        </button>
+    </div>
+
+    <div class="app-brand crypto-brand">
+        <div class="crypto-brand-mark">
+            <?php echo $isAuctionPackage ? "C" : "R"; ?>
         </div>
 
-        <div class="app-brand-subtitle">
-            <?php echo htmlspecialchars($displayUser); ?> · <?php echo ucfirst(htmlspecialchars($role)); ?>
+        <div>
+            <div class="app-brand-title">
+                <?php echo htmlspecialchars($sidebarTitle); ?>
+            </div>
+
+            <div class="app-brand-subtitle">
+                <?php echo htmlspecialchars($sidebarMode); ?>
+            </div>
+        </div>
+    </div>
+
+    <div class="sidebar-account-card">
+        <div class="sidebar-account-avatar">
+            <?php echo strtoupper(substr($displayUser, 0, 1)); ?>
+        </div>
+
+        <div>
+            <div class="sidebar-account-label">Account</div>
+            <div class="sidebar-account-name">
+                <?php echo htmlspecialchars($displayUser); ?>
+            </div>
+            <div class="sidebar-account-role">
+                <?php echo ucfirst(htmlspecialchars($role ?: "user")); ?>
+            </div>
         </div>
     </div>
 
@@ -86,66 +130,33 @@ $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ??
                 <?php echo $isAuctionPackage ? "Auction Admin" : "Stokvel Admin"; ?>
             </div>
 
-            <a href="<?php echo $appBase; ?>/admin/dashboard.php" class="sidebar-link <?php echo isActivePage('dashboard.php'); ?>">
-                <span class="sidebar-dot"></span>
-                Dashboard
-            </a>
-
-            <a href="<?php echo $appBase; ?>/admin/members.php" class="sidebar-link <?php echo isActivePage('members.php'); ?>">
-                <span class="sidebar-dot"></span>
-                Members
-            </a>
-
-            <a href="<?php echo $appBase; ?>/admin/admins.php" class="sidebar-link <?php echo isActivePage('admins.php'); ?>">
-                <span class="sidebar-dot"></span>
-                Admin Users
-            </a>
+            <?php
+                sidebarLink($appBase . "/admin/dashboard.php", "dashboard.php", "Dashboard", "▦");
+                sidebarLink($appBase . "/admin/members.php", "members.php", "Members", "●");
+                sidebarLink($appBase . "/admin/admins.php", "admins.php", "Admin Users", "♟");
+            ?>
 
             <?php if ($isSavingsPackage): ?>
-                <a href="<?php echo $appBase; ?>/admin/savings_requests.php" class="sidebar-link <?php echo isActivePage('savings_requests.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    Saving Requests
-                </a>
-
-                <a href="<?php echo $appBase; ?>/admin/withdrawals.php" class="sidebar-link <?php echo isActivePage('withdrawals.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    Withdrawals
-                </a>
-
-                <a href="<?php echo $appBase; ?>/admin/ledger.php" class="sidebar-link <?php echo isActivePage('ledger.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    Ledger
-                </a>
+                <?php
+                    sidebarLink($appBase . "/admin/savings_requests.php", "savings_requests.php", "Saving Requests", "▣");
+                    sidebarLink($appBase . "/admin/withdrawals.php", "withdrawals.php", "Withdrawals", "⇄");
+                    sidebarLink($appBase . "/admin/ledger.php", "ledger.php", "Ledger", "▤");
+                ?>
             <?php endif; ?>
 
             <?php if ($isAuctionPackage): ?>
-                <a href="<?php echo $appBase; ?>/admin/auction.php" class="sidebar-link <?php echo isActivePage('auction.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    Auction
-                </a>
-
-                <a href="<?php echo $appBase; ?>/admin/auction_pending_approval.php" class="sidebar-link <?php echo isActivePage('auction_pending_approval.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    Pending Approval
-                </a>
-
-                <a href="<?php echo $appBase; ?>/admin/auction_purchase_history.php" class="sidebar-link <?php echo isActivePage('auction_purchase_history.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    Auction History
-                </a>
+                <?php
+                    sidebarLink($appBase . "/admin/auction.php", "auction.php", "Auction", "◈");
+                    sidebarLink($appBase . "/admin/auction_pending_approval.php", "auction_pending_approval.php", "Pending Approval", "▣");
+                    sidebarLink($appBase . "/admin/auction_purchase_history.php", "auction_purchase_history.php", "Auction History", "▤");
+                ?>
             <?php endif; ?>
 
             <?php if ($showGroupChat): ?>
-                <a href="<?php echo $appBase; ?>/group_chat.php" class="sidebar-link <?php echo isActivePage('group_chat.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    Group Chat
-                </a>
+                <?php sidebarLink($appBase . "/group_chat.php", "group_chat.php", "Group Chat", "☰"); ?>
             <?php endif; ?>
 
-            <a href="<?php echo $appBase; ?>/admin/settings.php" class="sidebar-link <?php echo isActivePage('settings.php'); ?>">
-                <span class="sidebar-dot"></span>
-                Stokvel Settings
-            </a>
+            <?php sidebarLink($appBase . "/admin/settings.php", "settings.php", "Settings", "⚙"); ?>
         </div>
 
     <?php else: ?>
@@ -155,82 +166,42 @@ $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ??
                 <?php echo $isAuctionPackage ? "My Auction" : "My Stokvel"; ?>
             </div>
 
-            <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/dashboard.php" class="sidebar-link <?php echo isActivePage('dashboard.php'); ?>">
-                <span class="sidebar-dot"></span>
-                Dashboard
-            </a>
-
-            <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/profile.php" class="sidebar-link <?php echo isActivePage('profile.php'); ?>">
-                <span class="sidebar-dot"></span>
-                My Profile
-            </a>
+            <?php
+                sidebarLink($appBase . "/" . $memberFolder . "/dashboard.php", "dashboard.php", "Dashboard", "▦");
+                sidebarLink($appBase . "/" . $memberFolder . "/profile.php", "profile.php", "User Profile", "●");
+            ?>
 
             <?php if ($isSavingsPackage): ?>
-                <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/savings.php" class="sidebar-link <?php echo isActivePage('savings.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    My Savings
-                </a>
-
-                <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/withdrawals.php" class="sidebar-link <?php echo isActivePage('withdrawals.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    My Withdrawals
-                </a>
-
-                <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/statements.php" class="sidebar-link <?php echo isActivePage('statements.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    My Statement
-                </a>
+                <?php
+                    sidebarLink($appBase . "/" . $memberFolder . "/savings.php", "savings.php", "My Savings", "▣");
+                    sidebarLink($appBase . "/" . $memberFolder . "/withdrawals.php", "withdrawals.php", "My Withdrawals", "⇄");
+                    sidebarLink($appBase . "/" . $memberFolder . "/statements.php", "statements.php", "My Statement", "▤");
+                ?>
 
                 <?php if ($showReferrals): ?>
-                    <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/referrals.php" class="sidebar-link <?php echo isActivePage('referrals.php'); ?>">
-                        <span class="sidebar-dot"></span>
-                        My Referrals
-                    </a>
+                    <?php sidebarLink($appBase . "/" . $memberFolder . "/referrals.php", "referrals.php", "My Referrals", "⌖"); ?>
                 <?php endif; ?>
             <?php endif; ?>
 
             <?php if ($isAuctionPackage): ?>
-                <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction.php" class="sidebar-link <?php echo isActivePage('auction.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    Auction
-                </a>
-
-                <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction_pending_approval.php" class="sidebar-link <?php echo isActivePage('auction_pending_approval.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    Pending Approval
-                </a>
-
-              <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction_purchases.php" class="sidebar-link <?php echo isActivePage('auction_purchases.php'); ?>">
-    <span class="sidebar-dot"></span>
-    My Coin Purchases
-</a>
-
-<a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/sell_shares.php" class="sidebar-link <?php echo isActivePage('sell_shares.php'); ?>">
-    <span class="sidebar-dot"></span>
-    Sell Shares
-</a>
-
-<a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction_history.php" class="sidebar-link <?php echo isActivePage('auction_history.php'); ?>">
-    <span class="sidebar-dot"></span>
-    Auction History
-</a>
+                <?php
+                    sidebarLink($appBase . "/" . $memberFolder . "/auction.php", "auction.php", "Auction", "◈");
+                    sidebarLink($appBase . "/" . $memberFolder . "/auction_pending_approval.php", "auction_pending_approval.php", "Pending Shares", "▣");
+                    sidebarLink($appBase . "/" . $memberFolder . "/auction_purchases.php", "auction_purchases.php", "Shares I Bought", "✣");
+                    sidebarLink($appBase . "/" . $memberFolder . "/sell_shares.php", "sell_shares.php", "Sell Shares", "▤");
+                    sidebarLink($appBase . "/" . $memberFolder . "/auction_history.php", "auction_history.php", "Auction History", "☷");
+                ?>
             <?php endif; ?>
 
             <?php if ($showGroupChat): ?>
-                <a href="<?php echo $appBase; ?>/group_chat.php" class="sidebar-link <?php echo isActivePage('group_chat.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    Group Chat
-                </a>
+                <?php sidebarLink($appBase . "/group_chat.php", "group_chat.php", "Group Chat", "☰"); ?>
             <?php endif; ?>
         </div>
 
     <?php endif; ?>
 
     <div class="sidebar-footer">
-        <a href="<?php echo $appBase; ?>/logout.php" class="sidebar-link">
-            <span class="sidebar-dot"></span>
-            Logout
-        </a>
+        <?php sidebarLink($appBase . "/logout.php", "logout.php", "Logout", "▰"); ?>
     </div>
 
 </aside>
