@@ -591,7 +591,7 @@ $nextAuctionCoins = $displayAuctionCoins;
 
     <link rel="stylesheet" href="../assets/css/app.css?v=<?php echo time(); ?>">
 
-    <style>
+    <>
         .member-hero {
             background:
                 radial-gradient(circle at top right, rgba(216,169,40,0.22), transparent 34%),
@@ -1183,6 +1183,242 @@ $nextAuctionCoins = $displayAuctionCoins;
             }
         }
         <?php endif; ?>
+        <?php if ($isAuctionPackage): ?>
+/* Compact auction dashboard override */
+body {
+    font-size: 12px !important;
+}
+
+.app-topbar-title,
+.topbar-title {
+    font-size: 14px !important;
+    font-weight: 700 !important;
+}
+
+.app-topbar-subtitle,
+.topbar-subtitle,
+.topbar-user {
+    font-size: 11px !important;
+}
+
+.crypto-dashboard {
+    max-width: 980px !important;
+}
+
+.crypto-page-title {
+    font-size: 22px !important;
+    margin-bottom: 14px !important;
+}
+
+.crypto-top-cover {
+    min-height: 82px !important;
+    padding: 16px !important;
+    margin-bottom: 16px !important;
+}
+
+.crypto-top-cover div {
+    font-size: 11px !important;
+}
+
+.crypto-top-cover::after {
+    right: 20px !important;
+    top: 18px !important;
+    width: 34px !important;
+    height: 24px !important;
+    border-top-width: 3px !important;
+    border-bottom-width: 3px !important;
+}
+
+.crypto-online-banner {
+    padding: 12px 16px !important;
+    font-size: 12px !important;
+    margin-bottom: 16px !important;
+    border-radius: 5px !important;
+}
+
+.crypto-auction-panel {
+    padding: 16px !important;
+    margin-bottom: 16px !important;
+}
+
+.crypto-auction-title {
+    font-size: 18px !important;
+    margin-bottom: 5px !important;
+}
+
+.crypto-auction-subtitle {
+    font-size: 12px !important;
+    margin-bottom: 14px !important;
+}
+
+.crypto-countdown-row {
+    font-size: 12px !important;
+    gap: 10px !important;
+}
+
+.crypto-action-row {
+    gap: 8px !important;
+    margin-bottom: 16px !important;
+}
+
+.crypto-action {
+    padding: 8px 11px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    border-radius: 5px !important;
+}
+
+.crypto-dashboard-grid {
+    gap: 12px !important;
+    margin-bottom: 16px !important;
+}
+
+.crypto-dashboard-card {
+    min-height: 118px !important;
+    padding: 14px !important;
+    border-radius: 5px !important;
+    box-shadow: 0 18px 32px rgba(0,0,0,0.12) !important;
+}
+
+.crypto-icon-tile {
+    left: 14px !important;
+    top: -1px !important;
+    width: 70px !important;
+    height: 70px !important;
+    font-size: 28px !important;
+    border-radius: 5px !important;
+}
+
+.crypto-card-main {
+    min-height: 70px !important;
+    padding-left: 84px !important;
+}
+
+.crypto-card-label {
+    font-size: 11px !important;
+    margin-bottom: 4px !important;
+}
+
+.crypto-card-value {
+    font-size: 18px !important;
+    line-height: 1.2 !important;
+}
+
+.crypto-card-secondary {
+    margin-top: 12px !important;
+}
+
+.crypto-card-footer {
+    padding-top: 10px !important;
+    font-size: 11px !important;
+    gap: 6px !important;
+}
+
+.next-auction-card {
+    padding-top: 28px !important;
+    margin-bottom: 16px !important;
+}
+
+.next-auction-ribbon {
+    left: 16px !important;
+    padding: 11px 14px !important;
+    min-width: 160px !important;
+    font-size: 11px !important;
+    border-radius: 5px !important;
+}
+
+.next-auction-body {
+    padding-left: 175px !important;
+    min-height: 62px !important;
+}
+
+.crypto-offers-card {
+    margin-bottom: 18px !important;
+}
+
+.crypto-offers-heading {
+    padding: 14px 16px !important;
+}
+
+.crypto-offers-heading h4 {
+    font-size: 16px !important;
+    margin-bottom: 4px !important;
+}
+
+.crypto-offers-heading p {
+    font-size: 11px !important;
+}
+
+.crypto-offers-table {
+    font-size: 11px !important;
+}
+
+.crypto-offers-table th {
+    font-size: 11px !important;
+    padding: 10px 12px !important;
+}
+
+.crypto-offers-table td {
+    padding: 10px 12px !important;
+}
+
+.crypto-empty {
+    padding: 18px !important;
+    font-size: 11px !important;
+}
+
+.badge {
+    font-size: 10px !important;
+    padding: 5px 7px !important;
+}
+
+@media (max-width: 700px) {
+    .crypto-page-title {
+        font-size: 20px !important;
+    }
+
+    .crypto-dashboard-grid {
+        gap: 12px !important;
+    }
+
+    .crypto-dashboard-card {
+        min-height: 120px !important;
+    }
+
+    .crypto-icon-tile {
+        width: 64px !important;
+        height: 64px !important;
+        left: 14px !important;
+        font-size: 25px !important;
+    }
+
+    .crypto-card-main {
+        padding-left: 78px !important;
+    }
+
+    .crypto-card-label {
+        font-size: 10px !important;
+    }
+
+    .crypto-card-value {
+        font-size: 16px !important;
+    }
+
+    .next-auction-ribbon {
+        position: relative !important;
+        left: auto !important;
+        top: auto !important;
+        display: inline-block !important;
+        min-width: 0 !important;
+        margin-bottom: 12px !important;
+    }
+
+    .next-auction-body {
+        padding-left: 0 !important;
+        text-align: right !important;
+    }
+}
+<?php endif; ?>
     </style>
 </head>
 <body>
