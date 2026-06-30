@@ -1,11 +1,41 @@
 <?php
-// landing.php
+session_start();
+
+$isLoggedIn = isset($_SESSION["user_id"]);
+$role = $_SESSION["role"] ?? "";
+
+$dashboardLink = "login.php";
+
+if ($isLoggedIn) {
+    if ($role === "owner" || $role === "admin") {
+        $dashboardLink = "admin/dashboard.php";
+    } else {
+        $dashboardLink = "users/dashboard.php";
+    }
+}
+
+/*
+    Add your WhatsApp numbers here later.
+    Example: 27821234567
+*/
+$whatsappOne = "";
+$whatsappTwo = "";
+
+function whatsappLink($number) {
+    $number = preg_replace("/[^0-9]/", "", (string)$number);
+
+    if ($number === "") {
+        return "#contact";
+    }
+
+    return "https://wa.me/" . $number;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Stokvel Circle - Digital Stokvel Platform</title>
+    <title>Auction Express</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <link 
@@ -14,17 +44,6 @@
     >
 
     <style>
-        :root {
-            --green: #0f6b4f;
-            --green-dark: #073f2f;
-            --gold: #d8a928;
-            --gold-soft: #fff3bd;
-            --cream: #fbf7ed;
-            --ink: #10241f;
-            --muted: #667085;
-            --border: rgba(16, 36, 31, 0.12);
-        }
-
         * {
             box-sizing: border-box;
         }
@@ -36,12 +55,12 @@
         body {
             margin: 0;
             font-family: Arial, sans-serif;
-            color: var(--ink);
             background:
-                radial-gradient(circle at 8% 10%, rgba(216, 169, 40, 0.32), transparent 30%),
-                radial-gradient(circle at 90% 20%, rgba(15, 107, 79, 0.24), transparent 32%),
-                linear-gradient(135deg, #fff4c7 0%, #fbf7ed 36%, #e7f7ef 74%, #dff5e9 100%);
-            background-attachment: fixed;
+                radial-gradient(circle at 20% 0%, rgba(69, 90, 145, 0.20), transparent 34%),
+                radial-gradient(circle at 90% 10%, rgba(168, 59, 216, 0.13), transparent 30%),
+                linear-gradient(180deg, #0d1829 0%, #101a2c 50%, #0b1424 100%);
+            color: rgba(255,255,255,0.82);
+            font-size: 12px;
             overflow-x: hidden;
         }
 
@@ -49,554 +68,482 @@
             text-decoration: none;
         }
 
-        .site-shell {
-            position: relative;
-            overflow: hidden;
-        }
-
-        .money-bg-symbol {
-            position: fixed;
-            right: 34px;
-            bottom: 28px;
-            width: 180px;
-            height: 180px;
-            border-radius: 50%;
-            background: linear-gradient(145deg, rgba(248,216,106,0.42), rgba(216,169,40,0.24));
-            color: rgba(74,53,4,0.16);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 86px;
-            font-weight: 900;
-            transform: rotate(-14deg);
-            pointer-events: none;
-            z-index: 0;
-        }
-
         .site-nav {
             position: sticky;
             top: 0;
-            z-index: 100;
-            padding: 16px 0;
-            background: rgba(251, 247, 237, 0.78);
-            backdrop-filter: blur(18px);
-            border-bottom: 1px solid rgba(16,36,31,0.08);
+            z-index: 50;
+            background:
+                linear-gradient(rgba(13,24,41,0.88), rgba(13,24,41,0.94)),
+                radial-gradient(circle at top right, rgba(59,130,246,0.12), transparent 34%);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            backdrop-filter: blur(16px);
         }
 
         .nav-inner {
-            max-width: 1180px;
+            max-width: 1080px;
             margin: 0 auto;
-            padding: 0 18px;
+            padding: 12px 16px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 18px;
+            gap: 14px;
         }
 
         .brand {
             display: flex;
             align-items: center;
             gap: 10px;
-            font-weight: 900;
-            color: var(--ink);
+            color: #ffffff;
         }
 
-        .brand-icon {
-            width: 38px;
-            height: 38px;
-            border-radius: 50%;
-            background: linear-gradient(145deg, #f8d86a, #d8a928);
-            color: #4a3504;
+        .brand-mark {
+            width: 34px;
+            height: 34px;
+            border-radius: 7px;
+            background: linear-gradient(135deg, #a83bd8, #c447f0);
             display: flex;
             align-items: center;
             justify-content: center;
+            color: #ffffff;
+            font-size: 14px;
             font-weight: 900;
-            box-shadow: 0 12px 24px rgba(216,169,40,0.22);
+            box-shadow: 0 14px 24px rgba(168,59,216,0.20);
+        }
+
+        .brand-title {
+            font-size: 13px;
+            font-weight: 900;
+            line-height: 1.2;
+        }
+
+        .brand-subtitle {
+            font-size: 10px;
+            color: rgba(255,255,255,0.38);
+            line-height: 1.2;
         }
 
         .nav-links {
             display: flex;
             align-items: center;
-            gap: 18px;
-            font-size: 14px;
-            font-weight: 800;
+            gap: 14px;
         }
 
         .nav-links a {
-            color: #35544a;
+            color: rgba(255,255,255,0.56);
+            font-size: 11px;
+            font-weight: 800;
+        }
+
+        .nav-links a:hover {
+            color: #ffffff;
         }
 
         .nav-actions {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }
 
-        .btn-stokvel {
+        .btn-main {
             border: 0;
-            border-radius: 16px;
-            padding: 12px 16px;
-            background: linear-gradient(135deg, var(--green), var(--green-dark));
+            border-radius: 999px;
+            padding: 10px 16px;
+            background: linear-gradient(135deg, #16a085, #1abc9c);
             color: #ffffff;
+            font-size: 11px;
             font-weight: 900;
-            box-shadow: 0 16px 30px rgba(15,107,79,0.20);
+            text-transform: uppercase;
+            box-shadow: 0 14px 24px rgba(26,188,156,0.16);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
         }
 
-        .btn-stokvel:hover {
+        .btn-main:hover {
             color: #ffffff;
             transform: translateY(-1px);
         }
 
         .btn-soft {
-            border-radius: 16px;
-            padding: 11px 16px;
-            border: 1px solid rgba(16,36,31,0.12);
-            background: rgba(255,255,255,0.72);
-            color: var(--ink);
+            border-radius: 999px;
+            padding: 9px 15px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(255,255,255,0.045);
+            color: rgba(255,255,255,0.76);
+            font-size: 11px;
             font-weight: 900;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .btn-soft:hover {
-            background: #ffffff;
-            color: var(--green-dark);
+            color: #ffffff;
+            background: rgba(255,255,255,0.08);
+        }
+
+        .page-shell {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 26px 16px 50px;
         }
 
         .hero {
-            position: relative;
-            z-index: 1;
-            max-width: 1180px;
-            margin: 0 auto;
-            padding: 78px 18px 46px;
             display: grid;
-            grid-template-columns: 1fr 0.95fr;
-            gap: 36px;
-            align-items: center;
+            grid-template-columns: 1.12fr 0.88fr;
+            gap: 22px;
+            align-items: stretch;
+            margin-top: 14px;
+        }
+
+        .hero-card {
+            background:
+                linear-gradient(rgba(25,39,64,0.88), rgba(25,39,64,0.92)),
+                radial-gradient(circle at top right, rgba(168,59,216,0.18), transparent 34%);
+            border: 1px solid rgba(255,255,255,0.055);
+            border-radius: 6px;
+            padding: 26px;
+            box-shadow: 0 24px 48px rgba(0,0,0,0.20);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero-card::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: linear-gradient(180deg, #a83bd8, #11a7d8);
         }
 
         .hero-kicker {
             display: inline-flex;
             align-items: center;
-            gap: 9px;
-            background: rgba(255,255,255,0.74);
-            border: 1px solid rgba(255,255,255,0.88);
-            color: #7a5a09;
+            gap: 7px;
+            padding: 7px 10px;
             border-radius: 999px;
-            padding: 9px 13px;
-            font-size: 13px;
+            background: rgba(255,152,0,0.12);
+            border: 1px solid rgba(255,152,0,0.20);
+            color: #ffb74d;
+            font-size: 10px;
             font-weight: 900;
-            margin-bottom: 20px;
-            box-shadow: 0 12px 28px rgba(16,36,31,0.08);
-        }
-
-        .hero-kicker::before {
-            content: "";
-            width: 9px;
-            height: 9px;
-            border-radius: 50%;
-            background: var(--green);
+            text-transform: uppercase;
+            margin-bottom: 16px;
         }
 
         .hero-title {
-            font-size: clamp(42px, 6vw, 76px);
-            line-height: 0.94;
-            font-weight: 900;
-            letter-spacing: -0.075em;
-            margin-bottom: 22px;
-            color: var(--ink);
+            font-size: 34px;
+            line-height: 1.08;
+            font-weight: 300;
+            color: rgba(255,255,255,0.84);
+            margin-bottom: 14px;
+            letter-spacing: -0.04em;
         }
 
-        .hero-title span {
-            color: var(--green);
+        .hero-title strong {
+            color: #ffffff;
+            font-weight: 900;
         }
 
         .hero-text {
-            color: var(--muted);
-            font-size: 16px;
-            line-height: 1.7;
-            max-width: 650px;
-            margin-bottom: 26px;
+            color: rgba(255,255,255,0.45);
+            font-size: 13px;
+            line-height: 1.75;
+            max-width: 580px;
+            margin-bottom: 18px;
         }
 
         .hero-actions {
             display: flex;
             flex-wrap: wrap;
-            gap: 12px;
-            margin-bottom: 28px;
+            gap: 10px;
+            margin-top: 20px;
         }
 
-        .trust-row {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
-            max-width: 640px;
-        }
-
-        .trust-card {
-            background: rgba(255,255,255,0.74);
-            border: 1px solid rgba(255,255,255,0.86);
-            border-radius: 22px;
-            padding: 16px;
-            box-shadow: 0 16px 35px rgba(16,36,31,0.08);
-            backdrop-filter: blur(16px);
-        }
-
-        .trust-value {
-            font-size: 18px;
-            font-weight: 900;
-            color: var(--green-dark);
-        }
-
-        .trust-label {
-            font-size: 12px;
-            color: var(--muted);
-            margin-top: 4px;
-        }
-
-        .trading-panel {
+        .quick-panel {
             background:
-                radial-gradient(circle at top right, rgba(216,169,40,0.25), transparent 34%),
-                linear-gradient(135deg, rgba(255,255,255,0.92), rgba(232,247,239,0.88));
-            border: 1px solid rgba(255,255,255,0.88);
-            border-radius: 34px;
+                linear-gradient(rgba(22,34,57,0.88), rgba(22,34,57,0.94)),
+                radial-gradient(circle at right top, rgba(16,185,129,0.12), transparent 30%);
+            border: 1px solid rgba(255,255,255,0.055);
+            border-radius: 6px;
             padding: 22px;
-            box-shadow: 0 30px 80px rgba(16,36,31,0.16);
-            backdrop-filter: blur(18px);
-            position: relative;
-            overflow: hidden;
+            box-shadow: 0 24px 48px rgba(0,0,0,0.18);
         }
 
-        .trading-panel::after {
-            content: "R";
-            position: absolute;
-            right: 22px;
-            top: 18px;
-            width: 74px;
-            height: 74px;
-            border-radius: 50%;
-            background: linear-gradient(145deg, #f8d86a, #d8a928);
-            color: rgba(74,53,4,0.4);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 32px;
-            font-weight: 900;
-            opacity: 0.22;
-            transform: rotate(-13deg);
+        .quick-title {
+            font-size: 19px;
+            font-weight: 300;
+            color: rgba(255,255,255,0.70);
+            margin-bottom: 14px;
         }
 
-        .panel-top {
-            display: flex;
-            justify-content: space-between;
-            gap: 14px;
-            align-items: flex-start;
-            margin-bottom: 18px;
-            position: relative;
-            z-index: 2;
-        }
-
-        .panel-title {
-            font-size: 18px;
-            font-weight: 900;
-            letter-spacing: -0.03em;
-            margin-bottom: 4px;
-        }
-
-        .panel-subtitle {
-            color: var(--muted);
-            font-size: 13px;
-        }
-
-        .live-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-            background: #fff8df;
-            border: 1px solid rgba(216,169,40,0.35);
-            color: #7a5a09;
-            padding: 7px 11px;
-            border-radius: 999px;
-            font-size: 12px;
-            font-weight: 900;
-            white-space: nowrap;
-        }
-
-        .live-pill::before {
-            content: "";
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #10b981;
-            box-shadow: 0 0 0 rgba(16,185,129,0.6);
-            animation: pulseDot 1.4s infinite;
-        }
-
-        @keyframes pulseDot {
-            0% {
-                box-shadow: 0 0 0 0 rgba(16,185,129,0.6);
-            }
-            70% {
-                box-shadow: 0 0 0 8px rgba(16,185,129,0);
-            }
-            100% {
-                box-shadow: 0 0 0 0 rgba(16,185,129,0);
-            }
-        }
-
-        .chart-card {
-            background: #081f18;
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 26px;
-            padding: 16px;
-            overflow: hidden;
-            position: relative;
-            z-index: 2;
-            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
-        }
-
-        .chart-meta {
-            display: flex;
-            justify-content: space-between;
-            gap: 12px;
-            align-items: center;
-            margin-bottom: 10px;
-            color: rgba(255,255,255,0.78);
-            font-size: 13px;
-        }
-
-        .chart-price {
-            font-size: 25px;
-            font-weight: 900;
+        .rate-box {
+            background: linear-gradient(135deg, #ff9800, #ff7a00);
             color: #ffffff;
-            letter-spacing: -0.04em;
+            border-radius: 6px;
+            padding: 18px;
+            margin-bottom: 14px;
+            box-shadow: 0 18px 36px rgba(255,122,0,0.16);
         }
 
-        .chart-change {
-            color: #82f2b8;
-            font-weight: 900;
+        .rate-label {
+            font-size: 11px;
+            color: rgba(255,255,255,0.76);
+            margin-bottom: 3px;
+            font-weight: 800;
         }
 
-        #liveTradingChart {
-            width: 100%;
-            height: 260px;
-            display: block;
+        .rate-value {
+            font-size: 34px;
+            line-height: 1;
+            font-weight: 300;
         }
 
-        .mini-chart-grid {
+        .rate-note {
+            margin-top: 8px;
+            font-size: 11px;
+            color: rgba(255,255,255,0.75);
+        }
+
+        .mini-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
-            margin-top: 14px;
-            position: relative;
-            z-index: 2;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
         }
 
         .mini-card {
-            background: rgba(255,255,255,0.86);
-            border: 1px solid rgba(255,255,255,0.9);
-            border-radius: 20px;
-            padding: 14px;
+            background: rgba(13,24,41,0.58);
+            border: 1px solid rgba(255,255,255,0.055);
+            border-radius: 6px;
+            padding: 12px;
         }
 
         .mini-label {
-            color: var(--muted);
-            font-size: 12px;
-            font-weight: 800;
+            font-size: 10px;
+            color: rgba(255,255,255,0.34);
+            margin-bottom: 4px;
         }
 
         .mini-value {
-            margin-top: 4px;
-            font-size: 18px;
-            font-weight: 900;
-            color: var(--green-dark);
+            font-size: 15px;
+            color: rgba(255,255,255,0.74);
+            font-weight: 800;
         }
 
         .section {
-            position: relative;
-            z-index: 1;
-            max-width: 1180px;
-            margin: 0 auto;
-            padding: 44px 18px;
+            margin-top: 24px;
         }
 
         .section-head {
-            text-align: center;
-            max-width: 720px;
-            margin: 0 auto 28px;
-        }
-
-        .section-kicker {
-            color: var(--green);
-            font-size: 13px;
-            font-weight: 900;
-            text-transform: uppercase;
-            letter-spacing: 0.10em;
-            margin-bottom: 8px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
         }
 
         .section-title {
-            font-size: clamp(30px, 4vw, 46px);
-            line-height: 1.04;
-            letter-spacing: -0.055em;
-            font-weight: 900;
-            margin-bottom: 12px;
+            font-size: 20px;
+            color: rgba(255,255,255,0.70);
+            font-weight: 300;
+            margin: 0;
         }
 
         .section-text {
-            color: var(--muted);
-            font-size: 15px;
-            line-height: 1.7;
+            color: rgba(255,255,255,0.36);
+            font-size: 12px;
+            margin: 5px 0 0;
         }
 
-        .feature-grid {
+        .info-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 18px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 14px;
         }
 
-        .feature-card {
-            background: rgba(255,255,255,0.82);
-            border: 1px solid rgba(255,255,255,0.88);
-            border-radius: 28px;
-            padding: 24px;
-            box-shadow: 0 20px 50px rgba(16,36,31,0.10);
-            backdrop-filter: blur(16px);
-            min-height: 220px;
+        .info-card {
+            background: rgba(25, 39, 64, 0.86);
+            border: 1px solid rgba(255,255,255,0.045);
+            border-radius: 6px;
+            padding: 16px;
+            box-shadow: 0 18px 34px rgba(0,0,0,0.14);
             position: relative;
             overflow: hidden;
         }
 
-        .feature-card::after {
+        .info-card::before {
             content: "";
             position: absolute;
-            right: -48px;
-            bottom: -54px;
-            width: 130px;
-            height: 130px;
-            border-radius: 50%;
-            background: rgba(216,169,40,0.16);
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: linear-gradient(180deg, #a83bd8, #11a7d8);
+            opacity: 0.9;
         }
 
-        .feature-icon {
-            width: 46px;
-            height: 46px;
-            border-radius: 16px;
-            background: linear-gradient(135deg, var(--green), var(--green-dark));
+        .info-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 6px;
+            background: linear-gradient(135deg, #a83bd8, #c447f0);
             color: #ffffff;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: 900;
-            margin-bottom: 16px;
-            box-shadow: 0 14px 28px rgba(15,107,79,0.2);
-        }
-
-        .feature-title {
             font-size: 17px;
-            font-weight: 900;
-            margin-bottom: 8px;
-            letter-spacing: -0.03em;
+            margin-bottom: 12px;
         }
 
-        .feature-text {
-            color: var(--muted);
+        .info-title {
+            color: rgba(255,255,255,0.74);
             font-size: 14px;
-            line-height: 1.65;
-            margin-bottom: 0;
-        }
-
-        .growth-section {
-            display: grid;
-            grid-template-columns: 0.85fr 1.15fr;
-            gap: 22px;
-            align-items: stretch;
-        }
-
-        .growth-card {
-            background:
-                radial-gradient(circle at top right, rgba(15,107,79,0.16), transparent 34%),
-                linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,248,223,0.9));
-            border: 1px solid rgba(255,255,255,0.9);
-            border-radius: 30px;
-            padding: 24px;
-            box-shadow: 0 22px 55px rgba(16,36,31,0.12);
-            backdrop-filter: blur(18px);
-        }
-
-        #growthLineChart {
-            width: 100%;
-            height: 280px;
-            display: block;
-        }
-
-        .pricing-card {
-            max-width: 760px;
-            margin: 0 auto;
-            background:
-                radial-gradient(circle at top right, rgba(216,169,40,0.26), transparent 34%),
-                linear-gradient(135deg, rgba(255,255,255,0.94), rgba(232,247,239,0.9));
-            border: 1px solid rgba(255,255,255,0.9);
-            border-radius: 32px;
-            padding: 28px;
-            box-shadow: 0 24px 65px rgba(16,36,31,0.14);
-            text-align: center;
-        }
-
-        .pricing-price {
-            font-size: 48px;
             font-weight: 900;
-            letter-spacing: -0.06em;
-            color: var(--green-dark);
-            margin: 10px 0 4px;
+            margin-bottom: 7px;
         }
 
-        .pricing-price span {
-            font-size: 15px;
-            color: var(--muted);
-            letter-spacing: 0;
-        }
-
-        .pricing-list {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            text-align: left;
-            margin: 22px 0;
-        }
-
-        .pricing-item {
-            background: rgba(255,255,255,0.74);
-            border: 1px solid rgba(16,36,31,0.08);
-            border-radius: 18px;
-            padding: 12px 14px;
-            color: #34433d;
-            font-weight: 800;
-            font-size: 14px;
-        }
-
-        .disclaimer {
-            margin-top: 12px;
-            color: var(--muted);
+        .info-text {
+            color: rgba(255,255,255,0.38);
             font-size: 12px;
-            line-height: 1.55;
+            line-height: 1.6;
+            margin: 0;
+        }
+
+        .sessions-panel {
+            background: rgba(25, 39, 64, 0.86);
+            border: 1px solid rgba(255,255,255,0.045);
+            border-radius: 6px;
+            padding: 18px;
+            box-shadow: 0 18px 34px rgba(0,0,0,0.14);
+        }
+
+        .session-list {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .session-card {
+            background: rgba(13,24,41,0.58);
+            border: 1px solid rgba(255,255,255,0.055);
+            border-radius: 6px;
+            padding: 15px;
+        }
+
+        .session-name {
+            color: rgba(255,255,255,0.38);
+            font-size: 11px;
+            margin-bottom: 5px;
+        }
+
+        .session-time {
+            color: rgba(255,255,255,0.78);
+            font-size: 19px;
+            font-weight: 300;
+        }
+
+        .rules-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .rule-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            background: rgba(13,24,41,0.50);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 6px;
+            padding: 12px;
+        }
+
+        .rule-mark {
+            width: 24px;
+            height: 24px;
+            min-width: 24px;
+            border-radius: 5px;
+            background: linear-gradient(135deg, #16a085, #1abc9c);
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 900;
+        }
+
+        .rule-text {
+            color: rgba(255,255,255,0.50);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .rule-text strong {
+            color: rgba(255,255,255,0.82);
+        }
+
+        .contact-panel {
+            background:
+                linear-gradient(135deg, rgba(255,152,0,0.95), rgba(255,122,0,0.95));
+            color: #ffffff;
+            border-radius: 6px;
+            padding: 20px;
+            box-shadow: 0 18px 36px rgba(255,122,0,0.16);
+            margin-top: 24px;
+        }
+
+        .contact-title {
+            font-size: 19px;
+            font-weight: 300;
+            margin-bottom: 8px;
+        }
+
+        .contact-text {
+            color: rgba(255,255,255,0.76);
+            font-size: 12px;
+            line-height: 1.6;
+            margin-bottom: 14px;
+        }
+
+        .contact-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .btn-whatsapp {
+            background: rgba(255,255,255,0.14);
+            border: 1px solid rgba(255,255,255,0.25);
+            color: #ffffff;
+            border-radius: 999px;
+            padding: 10px 15px;
+            font-size: 11px;
+            font-weight: 900;
+        }
+
+        .btn-whatsapp:hover {
+            color: #ffffff;
+            background: rgba(255,255,255,0.22);
         }
 
         .footer {
-            position: relative;
-            z-index: 1;
-            padding: 34px 18px;
+            color: rgba(255,255,255,0.34);
+            font-size: 11px;
             text-align: center;
-            color: var(--muted);
-            font-size: 13px;
+            padding: 28px 16px 32px;
         }
 
-        @media (max-width: 980px) {
+        .footer strong {
+            color: rgba(255,255,255,0.66);
+        }
+
+        @media (max-width: 920px) {
             .hero {
                 grid-template-columns: 1fr;
-                padding-top: 52px;
             }
 
-            .feature-grid,
-            .growth-section {
+            .info-grid {
                 grid-template-columns: 1fr;
             }
 
@@ -615,536 +562,277 @@
                 align-items: stretch;
             }
 
-            .btn-soft,
-            .btn-stokvel {
-                padding: 10px 12px;
-                font-size: 13px;
+            .btn-main,
+            .btn-soft {
+                padding: 9px 12px;
+                font-size: 10px;
+            }
+
+            .hero-card,
+            .quick-panel {
+                padding: 20px;
             }
 
             .hero-title {
-                font-size: 44px;
+                font-size: 28px;
             }
 
-            .trust-row,
-            .mini-chart-grid,
-            .pricing-list {
+            .rate-value {
+                font-size: 30px;
+            }
+
+            .mini-grid,
+            .session-list {
                 grid-template-columns: 1fr;
-            }
-
-            .trading-panel,
-            .growth-card,
-            .pricing-card,
-            .feature-card {
-                border-radius: 24px;
-            }
-
-            #liveTradingChart {
-                height: 230px;
             }
         }
     </style>
 </head>
 <body>
 
-<div class="site-shell">
-    <div class="money-bg-symbol">R</div>
+<nav class="site-nav">
+    <div class="nav-inner">
+        <a href="index.php" class="brand">
+            <div class="brand-mark">A</div>
+            <div>
+                <div class="brand-title">Auction Express</div>
+                <div class="brand-subtitle">Peer to peer online platform</div>
+            </div>
+        </a>
 
-    <header class="site-nav">
-        <div class="nav-inner">
-            <a href="landing.php" class="brand">
-                <span class="brand-icon">S</span>
-                <span>Stokvel Circle</span>
+        <div class="nav-links">
+            <a href="#sessions">Sessions</a>
+            <a href="#rules">Rules</a>
+            <a href="#support">Support</a>
+            <a href="#contact">Contact</a>
+        </div>
+
+        <div class="nav-actions">
+            <a href="<?php echo htmlspecialchars($dashboardLink); ?>" class="btn-soft">
+                <?php echo $isLoggedIn ? "Dashboard" : "Login"; ?>
             </a>
 
-            <nav class="nav-links">
-                <a href="#features">Features</a>
-                <a href="#charts">Live Charts</a>
-                <a href="#pricing">Pricing</a>
-            </nav>
-
-            <div class="nav-actions">
-                <a href="login.php" class="btn-soft">Login</a>
-                <a href="register.php" class="btn-stokvel">Create Stokvel</a>
-            </div>
+            <?php if (!$isLoggedIn): ?>
+                <a href="register.php" class="btn-main">
+                    Register
+                </a>
+            <?php endif; ?>
         </div>
-    </header>
+    </div>
+</nav>
+
+<div class="page-shell">
 
     <section class="hero">
-        <div>
+        <div class="hero-card">
             <div class="hero-kicker">
-                Digital stokvel platform for trusted money circles
+                🔹🔸 Auction Express 🔸🔹
             </div>
 
             <h1 class="hero-title">
-                fave together. <span>Grow together.</span>
+                Where lives are transformed, <strong>digitally.</strong>
             </h1>
 
             <p class="hero-text">
-                Create a private stokvel, invite members with a link, approve savings,
-                track returns, manage withdrawals, and keep everyone updated with a group chat.
-                Built for modern savings groups that need visibility, trust, and simple money tracking.
+                Auction Express is a peer to peer online platform built for daily auction sessions,
+                member bidding, automated coin reallocations, and online support.
             </p>
 
             <div class="hero-actions">
-                <a href="register.php" class="btn-stokvel">
-                    Start Your Stokvel
+                <a href="<?php echo htmlspecialchars($dashboardLink); ?>" class="btn-main">
+                    <?php echo $isLoggedIn ? "Open Dashboard" : "Login To Account"; ?>
                 </a>
 
-                <a href="login.php" class="btn-soft">
-                    Member Login
+                <?php if (!$isLoggedIn): ?>
+                    <a href="register.php" class="btn-soft">
+                        Create Account
+                    </a>
+                <?php endif; ?>
+
+                <a href="#contact" class="btn-soft">
+                    Get In Touch
                 </a>
-            </div>
-
-            <div class="trust-row">
-                <div class="trust-card">
-                    <div class="trust-value">Private</div>
-                    <div class="trust-label">Each stokvel has its own data</div>
-                </div>
-
-                <div class="trust-card">
-                    <div class="trust-value">Tracked</div>
-                    <div class="trust-label">Savings, proof, returns, payouts</div>
-                </div>
-
-                <div class="trust-card">
-                    <div class="trust-value">Simple</div>
-                    <div class="trust-label">Member code login, no email needed</div>
-                </div>
             </div>
         </div>
 
-        <div class="trading-panel">
-            <div class="panel-top">
-                <div>
-                    <div class="panel-title">Live Stokvel Growth View</div>
-                    <div class="panel-subtitle">Demo trading-style chart for savings momentum</div>
-                </div>
-
-                <span class="live-pill">Live demo</span>
+        <div class="quick-panel">
+            <div class="quick-title">
+                Auction Package
             </div>
 
-            <div class="chart-card">
-                <div class="chart-meta">
-                    <div>
-                        <div style="font-size: 12px; color: rgba(255,255,255,0.55);">STOKVEL / ZAR</div>
-                        <div class="chart-price" id="chartPrice">R12,480.00</div>
-                    </div>
-
-                    <div class="chart-change" id="chartChange">+2.42%</div>
-                </div>
-
-                <canvas id="liveTradingChart"></canvas>
+            <div class="rate-box">
+                <div class="rate-label">Return</div>
+                <div class="rate-value">50%</div>
+                <div class="rate-note">in 3 days</div>
             </div>
 
-            <div class="mini-chart-grid">
+            <div class="mini-grid">
                 <div class="mini-card">
-                    <div class="mini-label">Active Savings</div>
-                    <div class="mini-value" id="activeSavings">R84,250</div>
+                    <div class="mini-label">Minimum</div>
+                    <div class="mini-value">R300.00</div>
                 </div>
 
                 <div class="mini-card">
-                    <div class="mini-label">Expected Returns</div>
-                    <div class="mini-value" id="expectedReturns">R8,425</div>
+                    <div class="mini-label">Maximum</div>
+                    <div class="mini-value">R3000</div>
                 </div>
 
                 <div class="mini-card">
-                    <div class="mini-label">Matured</div>
-                    <div class="mini-value" id="maturedValue">R21,700</div>
+                    <div class="mini-label">Pay After Bidding</div>
+                    <div class="mini-value">6 hours</div>
+                </div>
+
+                <div class="mini-card">
+                    <div class="mini-label">Referral Bonus</div>
+                    <div class="mini-value">5%</div>
                 </div>
             </div>
+        </div>
+    </section>
 
-            <p class="disclaimer">
-                This is a simulated visual chart for the landing page. Connect it to your real ledger later if you want actual platform data.
-            </p>
+    <section class="section" id="sessions">
+        <div class="section-head">
+            <div>
+                <h2 class="section-title">Daily Auction Sessions</h2>
+                <p class="section-text">Two sessions per day, every day.</p>
+            </div>
+        </div>
+
+        <div class="sessions-panel">
+            <div class="session-list">
+                <div class="session-card">
+                    <div class="session-name">Session 1</div>
+                    <div class="session-time">9:00 AM</div>
+                </div>
+
+                <div class="session-card">
+                    <div class="session-name">Session 2</div>
+                    <div class="session-time">6:00 PM</div>
+                </div>
+            </div>
         </div>
     </section>
 
     <section class="section" id="features">
         <div class="section-head">
-            <div class="section-kicker">What the platform does</div>
-            <h2 class="section-title">Everything your stokvel needs in one place</h2>
-            <p class="section-text">
-                The system gives every stokvel owner their own admin dashboard,
-                while members get a simple dashboard to save, upload proof, track maturity,
-                request withdrawals, and chat with the group.
-            </p>
+            <div>
+                <h2 class="section-title">Platform Highlights</h2>
+                <p class="section-text">Simple online auction flow for members.</p>
+            </div>
         </div>
 
-        <div class="feature-grid">
-            <div class="feature-card">
-                <div class="feature-icon">01</div>
-                <div class="feature-title">Multi-tenant stokvel accounts</div>
-                <p class="feature-text">
-                    Every owner creates their own stokvel. Members join under that owner using a private registration link.
+        <div class="info-grid">
+            <div class="info-card">
+                <div class="info-icon">🏦</div>
+                <div class="info-title">All SA Banks Accepted</div>
+                <p class="info-text">
+                    Members can participate using South African bank payments.
                 </p>
             </div>
 
-            <div class="feature-card">
-                <div class="feature-icon">02</div>
-                <div class="feature-title">Savings and proof tracking</div>
-                <p class="feature-text">
-                    Members submit saving amounts, upload proof of payment, and admins approve only verified payments.
+            <div class="info-card">
+                <div class="info-icon">🔁</div>
+                <div class="info-title">Automated Reallocation</div>
+                <p class="info-text">
+                    Reallocations of coins are within 24 hours and automated.
                 </p>
             </div>
 
-            <div class="feature-card">
-                <div class="feature-icon">03</div>
-                <div class="feature-title">Returns and maturity countdown</div>
-                <p class="feature-text">
-                    Return percentage and maturity days are set by the admin. Members can see countdowns until withdrawal time.
-                </p>
-            </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">04</div>
-                <div class="feature-title">Withdrawals and closed cycles</div>
-                <p class="feature-text">
-                    Once savings mature, members request withdrawals. Admins approve and mark them paid to close the cycle.
-                </p>
-            </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">05</div>
-                <div class="feature-title">Group chat</div>
-                <p class="feature-text">
-                    Members can communicate in one shared stokvel chat. Guests can preview and send limited messages before registering.
-                </p>
-            </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">06</div>
-                <div class="feature-title">Ledger and statements</div>
-                <p class="feature-text">
-                    Admins get a full ledger view, while members get their own personal statement history.
+            <div class="info-card">
+                <div class="info-icon">💻</div>
+                <div class="info-title">Online Support</div>
+                <p class="info-text">
+                    Online support is available between 8am and 6pm.
                 </p>
             </div>
         </div>
     </section>
 
-    <section class="section" id="charts">
-        <div class="growth-section">
-            <div class="growth-card">
-                <div class="section-kicker">Trading-style experience</div>
-                <h2 class="section-title">Make savings feel alive</h2>
-                <p class="section-text">
-                    The landing page uses animated charts to make the platform feel modern and exciting.
-                    Later, these charts can be connected to your real database totals such as active savings,
-                    returns, withdrawals, and growth over time.
-                </p>
-
-                <div class="pricing-list">
-                    <div class="pricing-item">Live-looking chart animation</div>
-                    <div class="pricing-item">Savings growth visual</div>
-                    <div class="pricing-item">Modern dashboard feel</div>
-                    <div class="pricing-item">Can connect to real data later</div>
-                </div>
+    <section class="section" id="rules">
+        <div class="section-head">
+            <div>
+                <h2 class="section-title">Auction Rules</h2>
+                <p class="section-text">Important member participation details.</p>
             </div>
+        </div>
 
-            <div class="growth-card">
-                <div class="panel-top">
-                    <div>
-                        <div class="panel-title">Savings Growth Trend</div>
-                        <div class="panel-subtitle">Demo line chart showing stokvel growth</div>
+        <div class="sessions-panel">
+            <div class="rules-list">
+                <div class="rule-row">
+                    <div class="rule-mark">1</div>
+                    <div class="rule-text">
+                        <strong>50% in 3 days</strong> on the auction package.
                     </div>
-
-                    <span class="live-pill">Updating</span>
                 </div>
 
-                <canvas id="growthLineChart"></canvas>
+                <div class="rule-row">
+                    <div class="rule-mark">2</div>
+                    <div class="rule-text">
+                        Minimum bid is <strong>R300.00</strong> and maximum bid is <strong>R3000</strong>.
+                    </div>
+                </div>
+
+                <div class="rule-row">
+                    <div class="rule-mark">3</div>
+                    <div class="rule-text">
+                        Members have <strong>6 hours</strong> to pay after bidding.
+                    </div>
+                </div>
+
+                <div class="rule-row">
+                    <div class="rule-mark">4</div>
+                    <div class="rule-text">
+                        Multiple bidding is allowed only after the first one is paid.
+                    </div>
+                </div>
+
+                <div class="rule-row">
+                    <div class="rule-mark">5</div>
+                    <div class="rule-text">
+                        Get <strong>5% unlimited referral bonus</strong>.
+                    </div>
+                </div>
+
+                <div class="rule-row">
+                    <div class="rule-mark">6</div>
+                    <div class="rule-text">
+                        Groups will be open between <strong>8am and 7pm daily</strong>.
+                    </div>
+                </div>
             </div>
         </div>
     </section>
 
-    <section class="section" id="pricing">
-        <div class="pricing-card">
-            <div class="section-kicker">Simple pricing</div>
-            <h2 class="section-title">Start with one stokvel</h2>
-            <p class="section-text">
-                Use this as the public website to explain the product and convert stokvel owners into paying subscribers.
-            </p>
+    <section class="contact-panel" id="contact">
+        <div class="contact-title">
+            Get in touch with us
+        </div>
 
-            <div class="pricing-price">
-                R450 <span>/ month</span>
-            </div>
+        <p class="contact-text">
+            For help, registration, bidding support, or account assistance, contact the Auction Express support team.
+        </p>
 
-            <div class="pricing-list">
-                <div class="pricing-item">Owner admin dashboard</div>
-                <div class="pricing-item">Member registration links</div>
-                <div class="pricing-item">Savings and proof tracking</div>
-                <div class="pricing-item">Withdrawal management</div>
-                <div class="pricing-item">Group chat</div>
-                <div class="pricing-item">Ledger and statements</div>
-            </div>
-
-            <a href="register.php" class="btn-stokvel">
-                Create Your Stokvel
+        <div class="contact-actions">
+            <a href="<?php echo htmlspecialchars(whatsappLink($whatsappOne)); ?>" class="btn-whatsapp">
+                WhatsApp 1
             </a>
 
-            <p class="disclaimer">
-                Pricing can be changed later when you add subscription billing.
-            </p>
+            <a href="<?php echo htmlspecialchars(whatsappLink($whatsappTwo)); ?>" class="btn-whatsapp">
+                WhatsApp 2
+            </a>
+
+            <a href="<?php echo htmlspecialchars($dashboardLink); ?>" class="btn-whatsapp">
+                <?php echo $isLoggedIn ? "Dashboard" : "Login"; ?>
+            </a>
         </div>
     </section>
 
-    <footer class="footer">
-        © <?php echo date("Y"); ?> Stokvel Circle. Built for trusted community savings.
-    </footer>
 </div>
 
-<script>
-const tradingCanvas = document.getElementById("liveTradingChart");
-const tradingCtx = tradingCanvas.getContext("2d");
-
-const growthCanvas = document.getElementById("growthLineChart");
-const growthCtx = growthCanvas.getContext("2d");
-
-let candles = [];
-let growthPoints = [];
-let currentPrice = 12480;
-
-function resizeCanvas(canvas) {
-    const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-}
-
-function rand(min, max) {
-    return Math.random() * (max - min) + min;
-}
-
-function seedCandles() {
-    candles = [];
-    let price = currentPrice;
-
-    for (let i = 0; i < 34; i++) {
-        const open = price;
-        const close = open + rand(-220, 260);
-        const high = Math.max(open, close) + rand(40, 170);
-        const low = Math.min(open, close) - rand(40, 170);
-
-        candles.push({ open, close, high, low });
-        price = close;
-    }
-
-    currentPrice = price;
-}
-
-function addCandle() {
-    const last = candles[candles.length - 1];
-    const open = last ? last.close : currentPrice;
-    const close = open + rand(-180, 230);
-    const high = Math.max(open, close) + rand(30, 140);
-    const low = Math.min(open, close) - rand(30, 140);
-
-    candles.push({ open, close, high, low });
-
-    if (candles.length > 34) {
-        candles.shift();
-    }
-
-    currentPrice = close;
-
-    const change = ((close - candles[0].open) / candles[0].open) * 100;
-
-    document.getElementById("chartPrice").textContent = "R" + close.toLocaleString("en-ZA", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    });
-
-    document.getElementById("chartChange").textContent = (change >= 0 ? "+" : "") + change.toFixed(2) + "%";
-    document.getElementById("chartChange").style.color = change >= 0 ? "#82f2b8" : "#ff9b9b";
-
-    document.getElementById("activeSavings").textContent = "R" + Math.round(84000 + rand(-1400, 2800)).toLocaleString("en-ZA");
-    document.getElementById("expectedReturns").textContent = "R" + Math.round(8400 + rand(-300, 520)).toLocaleString("en-ZA");
-    document.getElementById("maturedValue").textContent = "R" + Math.round(21700 + rand(-800, 1300)).toLocaleString("en-ZA");
-}
-
-function drawTradingChart() {
-    resizeCanvas(tradingCanvas);
-
-    const rect = tradingCanvas.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
-
-    tradingCtx.clearRect(0, 0, w, h);
-
-    tradingCtx.fillStyle = "#081f18";
-    tradingCtx.fillRect(0, 0, w, h);
-
-    const padding = 18;
-    const chartW = w - padding * 2;
-    const chartH = h - padding * 2;
-
-    const allHighs = candles.map(c => c.high);
-    const allLows = candles.map(c => c.low);
-    const maxPrice = Math.max(...allHighs);
-    const minPrice = Math.min(...allLows);
-
-    function y(price) {
-        return padding + ((maxPrice - price) / (maxPrice - minPrice || 1)) * chartH;
-    }
-
-    tradingCtx.strokeStyle = "rgba(255,255,255,0.06)";
-    tradingCtx.lineWidth = 1;
-
-    for (let i = 0; i <= 5; i++) {
-        const yy = padding + (chartH / 5) * i;
-        tradingCtx.beginPath();
-        tradingCtx.moveTo(padding, yy);
-        tradingCtx.lineTo(w - padding, yy);
-        tradingCtx.stroke();
-    }
-
-    const candleGap = 7;
-    const candleW = Math.max(7, (chartW / candles.length) - candleGap);
-
-    candles.forEach((candle, i) => {
-        const x = padding + i * (chartW / candles.length) + candleGap / 2;
-        const centerX = x + candleW / 2;
-
-        const isUp = candle.close >= candle.open;
-        const color = isUp ? "#82f2b8" : "#ff9b9b";
-
-        tradingCtx.strokeStyle = color;
-        tradingCtx.fillStyle = color;
-        tradingCtx.lineWidth = 2;
-
-        tradingCtx.beginPath();
-        tradingCtx.moveTo(centerX, y(candle.high));
-        tradingCtx.lineTo(centerX, y(candle.low));
-        tradingCtx.stroke();
-
-        const bodyTop = y(Math.max(candle.open, candle.close));
-        const bodyBottom = y(Math.min(candle.open, candle.close));
-        const bodyHeight = Math.max(4, bodyBottom - bodyTop);
-
-        tradingCtx.globalAlpha = 0.95;
-        tradingCtx.fillRect(x, bodyTop, candleW, bodyHeight);
-        tradingCtx.globalAlpha = 1;
-    });
-}
-
-function seedGrowth() {
-    growthPoints = [];
-    let value = 25000;
-
-    for (let i = 0; i < 34; i++) {
-        value += rand(400, 1800);
-        growthPoints.push(value);
-    }
-}
-
-function addGrowthPoint() {
-    const last = growthPoints[growthPoints.length - 1] || 25000;
-    const next = last + rand(-500, 1600);
-
-    growthPoints.push(next);
-
-    if (growthPoints.length > 34) {
-        growthPoints.shift();
-    }
-}
-
-function drawGrowthChart() {
-    resizeCanvas(growthCanvas);
-
-    const rect = growthCanvas.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
-
-    growthCtx.clearRect(0, 0, w, h);
-
-    const padding = 22;
-    const chartW = w - padding * 2;
-    const chartH = h - padding * 2;
-
-    const max = Math.max(...growthPoints);
-    const min = Math.min(...growthPoints);
-
-    function x(i) {
-        return padding + (chartW / (growthPoints.length - 1)) * i;
-    }
-
-    function y(value) {
-        return padding + ((max - value) / (max - min || 1)) * chartH;
-    }
-
-    growthCtx.strokeStyle = "rgba(16,36,31,0.08)";
-    growthCtx.lineWidth = 1;
-
-    for (let i = 0; i <= 5; i++) {
-        const yy = padding + (chartH / 5) * i;
-        growthCtx.beginPath();
-        growthCtx.moveTo(padding, yy);
-        growthCtx.lineTo(w - padding, yy);
-        growthCtx.stroke();
-    }
-
-    const gradient = growthCtx.createLinearGradient(0, padding, 0, h - padding);
-    gradient.addColorStop(0, "rgba(15,107,79,0.24)");
-    gradient.addColorStop(1, "rgba(15,107,79,0.00)");
-
-    growthCtx.beginPath();
-    growthPoints.forEach((point, i) => {
-        if (i === 0) {
-            growthCtx.moveTo(x(i), y(point));
-        } else {
-            growthCtx.lineTo(x(i), y(point));
-        }
-    });
-
-    growthCtx.lineTo(x(growthPoints.length - 1), h - padding);
-    growthCtx.lineTo(x(0), h - padding);
-    growthCtx.closePath();
-    growthCtx.fillStyle = gradient;
-    growthCtx.fill();
-
-    growthCtx.beginPath();
-    growthPoints.forEach((point, i) => {
-        if (i === 0) {
-            growthCtx.moveTo(x(i), y(point));
-        } else {
-            growthCtx.lineTo(x(i), y(point));
-        }
-    });
-
-    growthCtx.strokeStyle = "#0f6b4f";
-    growthCtx.lineWidth = 4;
-    growthCtx.stroke();
-
-    const lastX = x(growthPoints.length - 1);
-    const lastY = y(growthPoints[growthPoints.length - 1]);
-
-    growthCtx.fillStyle = "#d8a928";
-    growthCtx.beginPath();
-    growthCtx.arc(lastX, lastY, 6, 0, Math.PI * 2);
-    growthCtx.fill();
-}
-
-function animateCharts() {
-    addCandle();
-    addGrowthPoint();
-    drawTradingChart();
-    drawGrowthChart();
-}
-
-seedCandles();
-seedGrowth();
-drawTradingChart();
-drawGrowthChart();
-
-setInterval(animateCharts, 1300);
-
-window.addEventListener("resize", function () {
-    drawTradingChart();
-    drawGrowthChart();
-});
-</script>
+<footer class="footer" id="support">
+    <strong>Auction Express</strong><br>
+    Where Lives Are Transformed, Digitally.
+</footer>
 
 </body>
 </html>
