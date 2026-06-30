@@ -20,6 +20,10 @@ function coins($amount) {
     return number_format((float)$amount, 2) . " coins";
 }
 
+function money($amount) {
+    return "R" . number_format((float)$amount, 2);
+}
+
 function displayDate($dateValue) {
     if (empty($dateValue) || $dateValue === "0000-00-00 00:00:00") {
         return "-";
@@ -250,6 +254,14 @@ $purchases = $stmt->get_result();
                         <?php
                             $principal = (float)$p["principal_coins"];
 
+
+                            /*
+    1 coin = R1.
+    Buyer must pay the seller the rand value of the coins bought.
+*/
+$paymentAmount = $principal;
+$paymentReference = "Auction purchase #" . (int)$p["id"];
+
                             /*
                                 Always display the current owner package percentage.
                                 This prevents old 3% or old auction values from showing.
@@ -276,9 +288,12 @@ $purchases = $stmt->get_result();
                             <div class="row g-2 mb-3">
                                 <div class="col-md-4">
                                     <div class="detail-box">
-                                        <div class="detail-label">Coins Bought</div>
-                                        <strong><?php echo coins($principal); ?></strong>
-                                    </div>
+                                      <div class="detail-label">Coins Bought</div>
+<strong><?php echo coins($principal); ?></strong><br>
+<span class="text-muted">
+    Amount to pay: <?php echo money($paymentAmount); ?>
+</span>
+  </div>
                                 </div>
 
                                 <div class="col-md-4">
@@ -298,6 +313,18 @@ $purchases = $stmt->get_result();
                                     </div>
                                 </div>
                             </div>
+
+                            <div class="alert alert-warning mb-3">
+    <strong>Payment Required:</strong><br>
+    Please transfer <strong><?php echo money($paymentAmount); ?></strong> to the seller for the 
+    <strong><?php echo coins($principal); ?></strong> you bought.
+    <br>
+    Use the seller banking details below.
+    <br>
+    <small>
+        Suggested reference: <strong><?php echo htmlspecialchars($paymentReference); ?></strong>
+    </small>
+</div>
 
                             <div class="detail-box mb-3">
                                 <div class="detail-label">Seller Contact Details</div>
