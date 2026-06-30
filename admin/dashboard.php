@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once "../config/db.php";
+require_once "../includes/package_rules.php";
 
 if (!isset($_SESSION["user_id"])) {
     header("Location: ../login.php");
@@ -19,6 +20,22 @@ $role = $_SESSION["role"] ?? "admin";
 $username = $_SESSION["username"] ?? "";
 
 $displayName = $username ?: $name;
+
+$packageRules = getTenantPackageRules($conn, $tenant_id);
+
+$isAuctionPackage = function_exists("packageIsAuction")
+    ? packageIsAuction($packageRules)
+    : (($packageRules["package_type"] ?? "savings") === "auction");
+
+$isSavingsPackage = !$isAuctionPackage;
+
+$packageName = $packageRules["package_name"] ?? "Package";
+$returnPercent = (float)($packageRules["return_rate_percent"] ?? 0);
+$maturityDays = (int)($packageRules["maturity_days"] ?? 30);
+
+if ($maturityDays <= 0) {
+    $maturityDays = 30;
+}
 
 $tenantStmt = $conn->prepare("
     SELECT tenant_code, subscription_status, trial_ends_at
@@ -39,129 +56,34 @@ $host = $_SERVER["HTTP_HOST"];
 $basePath = rtrim(dirname($_SERVER["SCRIPT_NAME"], 2), "/\\");
 $memberLink = $scheme . "://" . $host . $basePath . "/signup.php?tenant=" . urlencode($tenant_code);
 
-$statsStmt = $conn->prepare("
-    SELECT
-        COUNT(*) AS total_members,
-        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_members,
-        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_members
-    FROM users
-    WHERE tenant_id = ?
-    AND role = 'member'
-");
-$statsStmt->bind_param("i", $tenant_id);
-$statsStmt->execute();
-$stats = $statsStmt->get_result()->fetch_assoc();
-
-$total_members = (int)($stats["total_members"] ?? 0);
-$pending_members = (int)($stats["pending_members"] ?? 0);
-$active_members = (int)($stats["active_members"] ?? 0);
-
-$savingsStatsStmt = $conn->prepare("
-    SELECT
-        COUNT(*) AS total_saving_requests,
-
-        SUM(CASE 
-            WHEN status IN ('pending', 'pending_payment', 'payment_submitted') 
-            THEN 1 ELSE 0 
-        END) AS pending_saving_requests,
-
-        SUM(CASE 
-            WHEN status = 'approved' 
-            THEN expected_total_amount ELSE 0 
-        END) AS approved_expected_total,
-
-        SUM(CASE 
-            WHEN status = 'approved' 
-            THEN expected_return_amount ELSE 0 
-        END) AS approved_expected_returns,
-
-        SUM(CASE 
-            WHEN status = 'withdrawn' 
-            THEN expected_total_amount ELSE 0 
-        END) AS withdrawn_total
-
-    FROM savings_requests
-    WHERE tenant_id = ?
-");
-$savingsStatsStmt->bind_param("i", $tenant_id);
-$savingsStatsStmt->execute();
-$savingsStats = $savingsStatsStmt->get_result()->fetch_assoc();
-
-$total_saving_requests = (int)($savingsStats["total_saving_requests"] ?? 0);
-$pending_saving_requests = (int)($savingsStats["pending_saving_requests"] ?? 0);
-$approved_expected_total = (float)($savingsStats["approved_expected_total"] ?? 0);
-$approved_expected_returns = (float)($savingsStats["approved_expected_returns"] ?? 0);
-$withdrawn_total = (float)($savingsStats["withdrawn_total"] ?? 0);
-
-$withdrawalStatsStmt = $conn->prepare("
-    SELECT
-        COUNT(*) AS total_withdrawals,
-        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_withdrawals,
-        SUM(CASE WHEN status = 'approved' THEN withdrawal_amount ELSE 0 END) AS approved_withdrawal_amount,
-        SUM(CASE WHEN status = 'paid' THEN withdrawal_amount ELSE 0 END) AS paid_withdrawal_amount
-    FROM withdrawal_requests
-    WHERE tenant_id = ?
-");
-$withdrawalStatsStmt->bind_param("i", $tenant_id);
-$withdrawalStatsStmt->execute();
-$withdrawalStats = $withdrawalStatsStmt->get_result()->fetch_assoc();
-
-$total_withdrawals = (int)($withdrawalStats["total_withdrawals"] ?? 0);
-$pending_withdrawals = (int)($withdrawalStats["pending_withdrawals"] ?? 0);
-$approved_withdrawal_amount = (float)($withdrawalStats["approved_withdrawal_amount"] ?? 0);
-$paid_withdrawal_amount = (float)($withdrawalStats["paid_withdrawal_amount"] ?? 0);
-
-$recentMembersStmt = $conn->prepare("
-    SELECT id, first_name, last_name, username, member_code, phone, status, created_at
-    FROM users
-    WHERE tenant_id = ?
-    AND role = 'member'
-    ORDER BY created_at DESC
-    LIMIT 5
-");
-$recentMembersStmt->bind_param("i", $tenant_id);
-$recentMembersStmt->execute();
-$recentMembers = $recentMembersStmt->get_result();
-
-$recentSavingsStmt = $conn->prepare("
-    SELECT 
-        sr.id,
-        sr.amount,
-        sr.expected_return_amount,
-        sr.expected_total_amount,
-        sr.status,
-        sr.created_at,
-        sr.payment_submitted_at,
-        sr.approved_at,
-        sr.matures_at,
-        u.username,
-        u.member_code,
-        u.first_name,
-        u.last_name
-    FROM savings_requests sr
-    INNER JOIN users u ON u.id = sr.user_id
-    WHERE sr.tenant_id = ?
-    ORDER BY sr.created_at DESC
-    LIMIT 5
-");
-$recentSavingsStmt->bind_param("i", $tenant_id);
-$recentSavingsStmt->execute();
-$recentSavings = $recentSavingsStmt->get_result();
-
 function money($amount) {
     return "R" . number_format((float)$amount, 2);
 }
 
-function memberDisplay($row) {
-    if (!empty($row["username"])) {
-        return $row["username"];
+function coins($amount) {
+    return number_format((float)$amount, 2) . " coins";
+}
+
+function memberDisplay($row, $prefix = "") {
+    if (!empty($row[$prefix . "username"])) {
+        return $row[$prefix . "username"];
     }
 
-    if (!empty($row["member_code"])) {
-        return $row["member_code"];
+    if (!empty($row[$prefix . "member_code"])) {
+        return $row[$prefix . "member_code"];
     }
 
-    return trim(($row["first_name"] ?? "") . " " . ($row["last_name"] ?? ""));
+    $fullName = trim(($row[$prefix . "first_name"] ?? "") . " " . ($row[$prefix . "last_name"] ?? ""));
+
+    return $fullName !== "" ? $fullName : "Member";
+}
+
+function displayDate($dateValue) {
+    if (empty($dateValue) || $dateValue === "0000-00-00 00:00:00") {
+        return "-";
+    }
+
+    return date("d M Y H:i", strtotime($dateValue));
 }
 
 function statusBadge($status) {
@@ -193,7 +115,35 @@ function statusBadge($status) {
         return '<span class="badge badge-rejected">' . ucfirst(htmlspecialchars($status)) . '</span>';
     }
 
-    return '<span class="badge bg-secondary">' . ucfirst(htmlspecialchars($status)) . '</span>';
+    return '<span class="badge bg-secondary">' . ucfirst(htmlspecialchars($status ?: "Unknown")) . '</span>';
+}
+
+function auctionStatusBadge($status) {
+    if ($status === "pending_seller_approval") {
+        return '<span class="badge bg-warning text-dark">Pending Seller</span>';
+    }
+
+    if ($status === "active") {
+        return '<span class="badge bg-primary">Counting Down</span>';
+    }
+
+    if ($status === "matured") {
+        return '<span class="badge bg-success">Ready to Sell</span>';
+    }
+
+    if ($status === "paid") {
+        return '<span class="badge bg-success">Paid</span>';
+    }
+
+    if ($status === "rejected") {
+        return '<span class="badge bg-danger">Rejected</span>';
+    }
+
+    if ($status === "cancelled") {
+        return '<span class="badge bg-secondary">Cancelled</span>';
+    }
+
+    return '<span class="badge bg-secondary">' . ucfirst(htmlspecialchars($status ?: "Unknown")) . '</span>';
 }
 
 $trialText = "Trial account";
@@ -208,13 +158,285 @@ if (!empty($trial_ends_at)) {
         $trialText = "Trial period ended";
     }
 }
+
+/*
+    Common member stats
+*/
+$statsStmt = $conn->prepare("
+    SELECT
+        COUNT(*) AS total_members,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_members,
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_members
+    FROM users
+    WHERE tenant_id = ?
+    AND role = 'member'
+");
+$statsStmt->bind_param("i", $tenant_id);
+$statsStmt->execute();
+$stats = $statsStmt->get_result()->fetch_assoc();
+
+$total_members = (int)($stats["total_members"] ?? 0);
+$pending_members = (int)($stats["pending_members"] ?? 0);
+$active_members = (int)($stats["active_members"] ?? 0);
+
+$recentMembersStmt = $conn->prepare("
+    SELECT id, first_name, last_name, username, member_code, phone, status, created_at
+    FROM users
+    WHERE tenant_id = ?
+    AND role = 'member'
+    ORDER BY created_at DESC
+    LIMIT 5
+");
+$recentMembersStmt->bind_param("i", $tenant_id);
+$recentMembersStmt->execute();
+$recentMembers = $recentMembersStmt->get_result();
+
+/*
+    Default values for savings dashboard
+*/
+$total_saving_requests = 0;
+$pending_saving_requests = 0;
+$approved_expected_total = 0;
+$approved_expected_returns = 0;
+$withdrawn_total = 0;
+$total_withdrawals = 0;
+$pending_withdrawals = 0;
+$approved_withdrawal_amount = 0;
+$paid_withdrawal_amount = 0;
+$recentSavings = null;
+
+/*
+    Default values for auction dashboard
+*/
+$totalAuctionLots = 0;
+$openAuctionLots = 0;
+$scheduledAuctionLots = 0;
+$queuedSellShares = 0;
+$totalOpenCoins = 0;
+$totalQueuedCoins = 0;
+$pendingSellerApprovals = 0;
+$pendingSellerCoins = 0;
+$activeClaims = 0;
+$maturedClaims = 0;
+$totalAuctionValue = 0;
+$recentAuctionActivity = null;
+$queuedLots = null;
+
+if ($isSavingsPackage) {
+    $savingsStatsStmt = $conn->prepare("
+        SELECT
+            COUNT(*) AS total_saving_requests,
+
+            SUM(CASE 
+                WHEN status IN ('pending', 'pending_payment', 'payment_submitted') 
+                THEN 1 ELSE 0 
+            END) AS pending_saving_requests,
+
+            SUM(CASE 
+                WHEN status = 'approved' 
+                THEN expected_total_amount ELSE 0 
+            END) AS approved_expected_total,
+
+            SUM(CASE 
+                WHEN status = 'approved' 
+                THEN expected_return_amount ELSE 0 
+            END) AS approved_expected_returns,
+
+            SUM(CASE 
+                WHEN status = 'withdrawn' 
+                THEN expected_total_amount ELSE 0 
+            END) AS withdrawn_total
+
+        FROM savings_requests
+        WHERE tenant_id = ?
+    ");
+    $savingsStatsStmt->bind_param("i", $tenant_id);
+    $savingsStatsStmt->execute();
+    $savingsStats = $savingsStatsStmt->get_result()->fetch_assoc();
+
+    $total_saving_requests = (int)($savingsStats["total_saving_requests"] ?? 0);
+    $pending_saving_requests = (int)($savingsStats["pending_saving_requests"] ?? 0);
+    $approved_expected_total = (float)($savingsStats["approved_expected_total"] ?? 0);
+    $approved_expected_returns = (float)($savingsStats["approved_expected_returns"] ?? 0);
+    $withdrawn_total = (float)($savingsStats["withdrawn_total"] ?? 0);
+
+    $withdrawalStatsStmt = $conn->prepare("
+        SELECT
+            COUNT(*) AS total_withdrawals,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_withdrawals,
+            SUM(CASE WHEN status = 'approved' THEN withdrawal_amount ELSE 0 END) AS approved_withdrawal_amount,
+            SUM(CASE WHEN status = 'paid' THEN withdrawal_amount ELSE 0 END) AS paid_withdrawal_amount
+        FROM withdrawal_requests
+        WHERE tenant_id = ?
+    ");
+    $withdrawalStatsStmt->bind_param("i", $tenant_id);
+    $withdrawalStatsStmt->execute();
+    $withdrawalStats = $withdrawalStatsStmt->get_result()->fetch_assoc();
+
+    $total_withdrawals = (int)($withdrawalStats["total_withdrawals"] ?? 0);
+    $pending_withdrawals = (int)($withdrawalStats["pending_withdrawals"] ?? 0);
+    $approved_withdrawal_amount = (float)($withdrawalStats["approved_withdrawal_amount"] ?? 0);
+    $paid_withdrawal_amount = (float)($withdrawalStats["paid_withdrawal_amount"] ?? 0);
+
+    $recentSavingsStmt = $conn->prepare("
+        SELECT 
+            sr.id,
+            sr.amount,
+            sr.expected_return_amount,
+            sr.expected_total_amount,
+            sr.status,
+            sr.created_at,
+            sr.payment_submitted_at,
+            sr.approved_at,
+            sr.matures_at,
+            u.username,
+            u.member_code,
+            u.first_name,
+            u.last_name
+        FROM savings_requests sr
+        INNER JOIN users u ON u.id = sr.user_id
+        WHERE sr.tenant_id = ?
+        ORDER BY sr.created_at DESC
+        LIMIT 5
+    ");
+    $recentSavingsStmt->bind_param("i", $tenant_id);
+    $recentSavingsStmt->execute();
+    $recentSavings = $recentSavingsStmt->get_result();
+} else {
+    /*
+        Auction dashboard stats
+    */
+    $matureStmt = $conn->prepare("
+        UPDATE auction_claims
+        SET status = 'matured'
+        WHERE tenant_id = ?
+        AND status = 'active'
+        AND matures_at IS NOT NULL
+        AND matures_at <= NOW()
+    ");
+    $matureStmt->bind_param("i", $tenant_id);
+    $matureStmt->execute();
+
+    $lotStatsStmt = $conn->prepare("
+        SELECT
+            COUNT(*) AS total_lots,
+            SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_lots,
+            SUM(CASE WHEN status = 'scheduled' THEN 1 ELSE 0 END) AS scheduled_lots,
+
+            SUM(CASE 
+                WHEN status = 'scheduled' 
+                AND source_claim_id IS NOT NULL
+                THEN 1 ELSE 0 
+            END) AS queued_sell_shares,
+
+            SUM(CASE 
+                WHEN status = 'open' 
+                THEN remaining_coins ELSE 0 
+            END) AS total_open_coins,
+
+            SUM(CASE 
+                WHEN status = 'scheduled' 
+                THEN remaining_coins ELSE 0 
+            END) AS total_queued_coins
+
+        FROM auction_lots
+        WHERE tenant_id = ?
+        AND remaining_coins >= 0
+    ");
+    $lotStatsStmt->bind_param("i", $tenant_id);
+    $lotStatsStmt->execute();
+    $lotStats = $lotStatsStmt->get_result()->fetch_assoc();
+
+    $totalAuctionLots = (int)($lotStats["total_lots"] ?? 0);
+    $openAuctionLots = (int)($lotStats["open_lots"] ?? 0);
+    $scheduledAuctionLots = (int)($lotStats["scheduled_lots"] ?? 0);
+    $queuedSellShares = (int)($lotStats["queued_sell_shares"] ?? 0);
+    $totalOpenCoins = (float)($lotStats["total_open_coins"] ?? 0);
+    $totalQueuedCoins = (float)($lotStats["total_queued_coins"] ?? 0);
+
+    $claimStatsStmt = $conn->prepare("
+        SELECT
+            SUM(CASE WHEN status = 'pending_seller_approval' THEN 1 ELSE 0 END) AS pending_seller_approvals,
+            SUM(CASE WHEN status = 'pending_seller_approval' THEN principal_coins ELSE 0 END) AS pending_seller_coins,
+            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_claims,
+            SUM(CASE WHEN status = 'matured' THEN 1 ELSE 0 END) AS matured_claims,
+            SUM(CASE WHEN status IN ('active', 'matured') THEN total_due_coins ELSE 0 END) AS total_auction_value
+        FROM auction_claims
+        WHERE tenant_id = ?
+    ");
+    $claimStatsStmt->bind_param("i", $tenant_id);
+    $claimStatsStmt->execute();
+    $claimStats = $claimStatsStmt->get_result()->fetch_assoc();
+
+    $pendingSellerApprovals = (int)($claimStats["pending_seller_approvals"] ?? 0);
+    $pendingSellerCoins = (float)($claimStats["pending_seller_coins"] ?? 0);
+    $activeClaims = (int)($claimStats["active_claims"] ?? 0);
+    $maturedClaims = (int)($claimStats["matured_claims"] ?? 0);
+    $totalAuctionValue = (float)($claimStats["total_auction_value"] ?? 0);
+
+    $recentAuctionStmt = $conn->prepare("
+        SELECT
+            ac.id,
+            ac.principal_coins,
+            ac.return_percent,
+            ac.return_coins,
+            ac.total_due_coins,
+            ac.status,
+            ac.claimed_at,
+            ac.approved_at,
+            ac.matures_at,
+
+            buyer.username AS buyer_username,
+            buyer.member_code AS buyer_member_code,
+            buyer.first_name AS buyer_first_name,
+            buyer.last_name AS buyer_last_name,
+
+            seller.username AS seller_username,
+            seller.member_code AS seller_member_code,
+            seller.first_name AS seller_first_name,
+            seller.last_name AS seller_last_name
+        FROM auction_claims ac
+        INNER JOIN users buyer ON buyer.id = ac.buyer_user_id
+        INNER JOIN users seller ON seller.id = ac.seller_user_id
+        WHERE ac.tenant_id = ?
+        ORDER BY ac.claimed_at DESC, ac.id DESC
+        LIMIT 5
+    ");
+    $recentAuctionStmt->bind_param("i", $tenant_id);
+    $recentAuctionStmt->execute();
+    $recentAuctionActivity = $recentAuctionStmt->get_result();
+
+    $queuedLotsStmt = $conn->prepare("
+        SELECT
+            al.id,
+            al.coin_amount,
+            al.remaining_coins,
+            al.status,
+            al.source_claim_id,
+            al.created_at,
+            seller.username AS seller_username,
+            seller.member_code AS seller_member_code,
+            seller.first_name AS seller_first_name,
+            seller.last_name AS seller_last_name
+        FROM auction_lots al
+        LEFT JOIN users seller ON seller.id = al.seller_user_id
+        WHERE al.tenant_id = ?
+        AND al.status = 'scheduled'
+        AND al.remaining_coins > 0
+        ORDER BY al.created_at DESC, al.id DESC
+        LIMIT 5
+    ");
+    $queuedLotsStmt->bind_param("i", $tenant_id);
+    $queuedLotsStmt->execute();
+    $queuedLots = $queuedLotsStmt->get_result();
+}
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Admin Dashboard</title>
+    <title><?php echo $isAuctionPackage ? "Auction Admin Dashboard" : "Admin Dashboard"; ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <link 
@@ -245,7 +467,7 @@ if (!empty($trial_ends_at)) {
         }
 
         .app-content::before {
-            content: "R";
+            content: "<?php echo $isAuctionPackage ? 'C' : 'R'; ?>";
             position: fixed;
             right: 40px;
             bottom: 34px;
@@ -284,7 +506,7 @@ if (!empty($trial_ends_at)) {
         }
 
         .admin-hero::after {
-            content: "R";
+            content: "<?php echo $isAuctionPackage ? 'C' : 'R'; ?>";
             position: absolute;
             right: 34px;
             top: 24px;
@@ -313,7 +535,8 @@ if (!empty($trial_ends_at)) {
             background: rgba(216,169,40,0.16);
         }
 
-        .admin-kicker {
+        .admin-kicker,
+        .package-pill {
             display: inline-flex;
             align-items: center;
             gap: 8px;
@@ -324,12 +547,13 @@ if (!empty($trial_ends_at)) {
             padding: 8px 12px;
             font-size: 12px;
             font-weight: 900;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
             position: relative;
             z-index: 2;
         }
 
-        .admin-kicker::before {
+        .admin-kicker::before,
+        .package-pill::before {
             content: "";
             width: 8px;
             height: 8px;
@@ -351,7 +575,7 @@ if (!empty($trial_ends_at)) {
             color: rgba(255,255,255,0.78);
             font-size: 14px;
             line-height: 1.6;
-            max-width: 680px;
+            max-width: 720px;
             margin-bottom: 20px;
             position: relative;
             z-index: 2;
@@ -410,7 +634,7 @@ if (!empty($trial_ends_at)) {
         }
 
         .stat-card::after {
-            content: "R";
+            content: "<?php echo $isAuctionPackage ? 'C' : 'R'; ?>";
             position: absolute;
             right: 18px;
             top: 12px;
@@ -574,250 +798,525 @@ if (!empty($trial_ends_at)) {
     <main class="app-main">
         <div class="app-topbar">
             <div>
-                <div class="app-topbar-title">Admin Dashboard</div>
+                <div class="app-topbar-title">
+                    <?php echo $isAuctionPackage ? "Auction Admin Dashboard" : "Admin Dashboard"; ?>
+                </div>
                 <div class="app-topbar-subtitle">
-                    Manage your stokvel, members, savings, withdrawals, and group activity.
+                    <?php if ($isAuctionPackage): ?>
+                        Manage auction lots, queued sell shares, seller approvals, and member activity.
+                    <?php else: ?>
+                        Manage your stokvel, members, savings, withdrawals, and group activity.
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
 
         <div class="app-content">
 
-            <div class="admin-hero">
-                <div class="admin-kicker">
-                    <?php echo ucfirst(htmlspecialchars($subscription_status)); ?> Account · <?php echo htmlspecialchars($trialText); ?>
-                </div>
+            <?php if ($isAuctionPackage): ?>
 
-                <div class="admin-hero-title">
-                    Welcome, <?php echo htmlspecialchars($displayName); ?>
-                </div>
+                <div class="admin-hero">
+                    <div class="admin-kicker">
+                        <?php echo ucfirst(htmlspecialchars($subscription_status)); ?> Account · <?php echo htmlspecialchars($trialText); ?>
+                    </div>
 
-                <p class="admin-hero-text">
-                    You are managing <strong><?php echo htmlspecialchars($stokvel_name); ?></strong>.
-                    Use this dashboard to approve members, verify saving requests, track withdrawals,
-                    and keep your stokvel circle organised.
-                </p>
+                    <div class="package-pill">
+                        <?php echo htmlspecialchars($packageName); ?>
+                        · <?php echo number_format($returnPercent, 2); ?>%
+                        · <?php echo (int)$maturityDays; ?> days
+                    </div>
 
-                <div class="hero-actions">
-                    <a href="members.php" class="btn-hero-light">
-                        Manage Members
-                    </a>
+                    <div class="admin-hero-title">
+                        Welcome, <?php echo htmlspecialchars($displayName); ?>
+                    </div>
 
-                    <a href="savings_requests.php" class="btn-hero-outline">
-                        Review Savings
-                    </a>
+                    <p class="admin-hero-text">
+                        You are managing <strong><?php echo htmlspecialchars($stokvel_name); ?></strong> as an auction package.
+                        Use this dashboard to manage lots, monitor sell-share queues, track seller approvals,
+                        and keep auction activity moving.
+                    </p>
 
-                    <a href="../group_chat.php" class="btn-hero-outline">
-                        Open Group Chat
-                    </a>
-                </div>
-            </div>
+                    <div class="hero-actions">
+                        <a href="auction.php" class="btn-hero-light">
+                            Manage Auction
+                        </a>
 
-            <div class="row g-3 mb-4">
-                <div class="col-md-3">
-                    <div class="stat-card stat-card-green">
-                        <div class="stat-label">Total Members</div>
-                        <div class="stat-value"><?php echo $total_members; ?></div>
-                        <div class="text-muted" style="font-size: 12px; position: relative; z-index: 2;">
-                            Active: <?php echo $active_members; ?>
-                        </div>
+                        <a href="auction_pending_approval.php" class="btn-hero-outline">
+                            Pending Approval
+                        </a>
+
+                        <a href="auction_purchase_history.php" class="btn-hero-outline">
+                            Auction History
+                        </a>
+
+                        <a href="members.php" class="btn-hero-outline">
+                            Members
+                        </a>
                     </div>
                 </div>
 
-                <div class="col-md-3">
-                    <div class="stat-card stat-card-gold">
-                        <div class="stat-label">Pending Members</div>
-                        <div class="stat-value"><?php echo $pending_members; ?></div>
-                    </div>
-                </div>
-
-                <div class="col-md-3">
-                    <div class="stat-card stat-card-blue">
-                        <div class="stat-label">Saving Requests</div>
-                        <div class="stat-value"><?php echo $total_saving_requests; ?></div>
-                        <div class="text-muted" style="font-size: 12px; position: relative; z-index: 2;">
-                            Pending: <?php echo $pending_saving_requests; ?>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-md-3">
-                    <div class="stat-card stat-card-red">
-                        <div class="stat-label">Active Balance</div>
-                        <div class="stat-value">
-                            <?php echo money($approved_expected_total); ?>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="row g-4 mb-4">
-                <div class="col-lg-7">
-                    <div class="card-box dashboard-card-green">
-                        <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-3">
-                            <div>
-                                <h5 class="quick-card-title mb-1">Invite Members</h5>
-                                <p class="text-muted mb-0" style="font-size: 13px;">
-                                    Share this link with people who must join your stokvel.
-                                </p>
+                <div class="row g-3 mb-4">
+                    <div class="col-md-3">
+                        <div class="stat-card stat-card-green">
+                            <div class="stat-label">Total Members</div>
+                            <div class="stat-value"><?php echo $total_members; ?></div>
+                            <div class="text-muted" style="font-size: 12px; position: relative; z-index: 2;">
+                                Active: <?php echo $active_members; ?>
                             </div>
-
-                            <a href="members.php" class="btn btn-outline-dark btn-sm">
-                                Manage Members
-                            </a>
-                        </div>
-
-                        <div class="invite-panel mb-3" id="inviteLink">
-                            <?php echo htmlspecialchars($memberLink); ?>
-                        </div>
-
-                        <button class="btn btn-dark btn-sm" onclick="copyInviteLink()">
-                            Copy Registration Link
-                        </button>
-                    </div>
-                </div>
-
-                <div class="col-lg-5">
-                    <div class="card-box dashboard-card-gold">
-                        <h5 class="quick-card-title">Today’s Focus</h5>
-                        <p class="text-muted mb-3" style="font-size: 13px;">
-                            Keep the money circle moving by approving members, verifying proof of payment,
-                            and checking withdrawals.
-                        </p>
-
-                        <div class="d-grid gap-2">
-                            <a href="members.php" class="btn btn-outline-dark">
-                                View Members
-                            </a>
-
-                            <a href="savings_requests.php" class="btn btn-dark">
-                                View Saving Requests
-                            </a>
-
-                            <a href="withdrawals.php" class="btn btn-outline-dark">
-                                View Withdrawals
-                            </a>
                         </div>
                     </div>
-                </div>
-            </div>
 
-            <div class="row g-4">
-                <div class="col-lg-7">
-                    <div class="card-box dashboard-card-mixed">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <div>
-                                <h5 class="quick-card-title mb-1">Recent Saving Activity</h5>
-                                <p class="text-muted mb-0" style="font-size: 13px;">
-                                    Latest member saving requests.
-                                </p>
+                    <div class="col-md-3">
+                        <div class="stat-card stat-card-gold">
+                            <div class="stat-label">Pending Approval</div>
+                            <div class="stat-value"><?php echo $pendingSellerApprovals; ?></div>
+                            <div class="text-muted" style="font-size: 12px; position: relative; z-index: 2;">
+                                <?php echo coins($pendingSellerCoins); ?>
                             </div>
-
-                            <a href="savings_requests.php" class="btn btn-outline-dark btn-sm">
-                                View All
-                            </a>
                         </div>
+                    </div>
 
-                        <?php if ($recentSavings->num_rows > 0): ?>
-                            <?php while ($row = $recentSavings->fetch_assoc()): ?>
-                                <div class="activity-item">
-                                    <div>
-                                        <div class="activity-title">
-                                            <?php echo htmlspecialchars(memberDisplay($row)); ?>
-                                        </div>
-                                        <div class="activity-meta">
-                                            <?php echo date("d M Y H:i", strtotime($row["created_at"])); ?>
-                                            · <?php echo statusBadge($row["status"]); ?>
-                                        </div>
-                                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card stat-card-blue">
+                            <div class="stat-label">Open Coins</div>
+                            <div class="stat-value"><?php echo coins($totalOpenCoins); ?></div>
+                            <div class="text-muted" style="font-size: 12px; position: relative; z-index: 2;">
+                                Lots: <?php echo $openAuctionLots; ?>
+                            </div>
+                        </div>
+                    </div>
 
-                                    <div class="activity-amount">
-                                        <?php echo money($row["expected_total_amount"]); ?>
-                                        <div class="text-muted" style="font-size: 12px;">
-                                            Saved <?php echo money($row["amount"]); ?>
-                                        </div>
-                                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card stat-card-red">
+                            <div class="stat-label">Queued Shares</div>
+                            <div class="stat-value"><?php echo coins($totalQueuedCoins); ?></div>
+                            <div class="text-muted" style="font-size: 12px; position: relative; z-index: 2;">
+                                Queue items: <?php echo $scheduledAuctionLots; ?>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-4 mb-4">
+                    <div class="col-lg-7">
+                        <div class="card-box dashboard-card-green">
+                            <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-3">
+                                <div>
+                                    <h5 class="quick-card-title mb-1">Invite Members</h5>
+                                    <p class="text-muted mb-0" style="font-size: 13px;">
+                                        Share this link with people who must join your auction package.
+                                    </p>
                                 </div>
-                            <?php endwhile; ?>
-                        <?php else: ?>
-                            <div class="text-center text-muted py-4">
-                                No saving activity yet.
+
+                                <a href="members.php" class="btn btn-outline-dark btn-sm">
+                                    Manage Members
+                                </a>
                             </div>
-                        <?php endif; ?>
+
+                            <div class="invite-panel mb-3" id="inviteLink">
+                                <?php echo htmlspecialchars($memberLink); ?>
+                            </div>
+
+                            <button class="btn btn-dark btn-sm" onclick="copyInviteLink()">
+                                Copy Registration Link
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-5">
+                        <div class="card-box dashboard-card-gold">
+                            <h5 class="quick-card-title">Today’s Auction Focus</h5>
+                            <p class="text-muted mb-3" style="font-size: 13px;">
+                                Review seller approvals, check queued sell shares, and open the next auction when ready.
+                            </p>
+
+                            <div class="d-grid gap-2">
+                                <a href="auction.php" class="btn btn-dark">
+                                    Manage Auction
+                                </a>
+
+                                <a href="auction_pending_approval.php" class="btn btn-outline-dark">
+                                    Pending Approval
+                                    <?php if ($pendingSellerApprovals > 0): ?>
+                                        (<?php echo $pendingSellerApprovals; ?>)
+                                    <?php endif; ?>
+                                </a>
+
+                                <a href="auction_purchase_history.php" class="btn btn-outline-dark">
+                                    Auction History
+                                </a>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div class="col-lg-5">
-                    <div class="card-box dashboard-card-green">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <div>
-                                <h5 class="quick-card-title mb-1">Recent Members</h5>
-                                <p class="text-muted mb-0" style="font-size: 13px;">
-                                    Newest people who joined your stokvel.
-                                </p>
-                            </div>
-
-                            <a href="members.php" class="btn btn-outline-dark btn-sm">
-                                View All
-                            </a>
-                        </div>
-
-                        <?php if ($recentMembers->num_rows > 0): ?>
-                            <?php while ($member = $recentMembers->fetch_assoc()): ?>
-                                <div class="activity-item">
-                                    <div>
-                                        <div class="activity-title">
-                                            <?php echo htmlspecialchars(memberDisplay($member)); ?>
-                                        </div>
-                                        <div class="activity-meta">
-                                            <?php echo htmlspecialchars($member["phone"] ?: "-"); ?>
-                                            · <?php echo statusBadge($member["status"]); ?>
-                                        </div>
-                                    </div>
-
-                                    <div class="activity-amount">
-                                        <?php echo htmlspecialchars($member["member_code"] ?: "-"); ?>
-                                        <div class="text-muted" style="font-size: 12px;">
-                                            <?php echo date("d M Y", strtotime($member["created_at"])); ?>
-                                        </div>
-                                    </div>
+                <div class="row g-4">
+                    <div class="col-lg-7">
+                        <div class="card-box dashboard-card-mixed">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <div>
+                                    <h5 class="quick-card-title mb-1">Recent Auction Activity</h5>
+                                    <p class="text-muted mb-0" style="font-size: 13px;">
+                                        Latest buyer and seller auction transactions.
+                                    </p>
                                 </div>
-                            <?php endwhile; ?>
-                        <?php else: ?>
-                            <div class="text-center text-muted py-4">
-                                No members have joined yet.
+
+                                <a href="auction_purchase_history.php" class="btn btn-outline-dark btn-sm">
+                                    View All
+                                </a>
                             </div>
-                        <?php endif; ?>
+
+                            <?php if ($recentAuctionActivity && $recentAuctionActivity->num_rows > 0): ?>
+                                <?php while ($row = $recentAuctionActivity->fetch_assoc()): ?>
+                                    <div class="activity-item">
+                                        <div>
+                                            <div class="activity-title">
+                                                Buyer: <?php echo htmlspecialchars(memberDisplay($row, "buyer_")); ?>
+                                            </div>
+                                            <div class="activity-meta">
+                                                Seller: <?php echo htmlspecialchars(memberDisplay($row, "seller_")); ?>
+                                                · <?php echo htmlspecialchars(displayDate($row["claimed_at"])); ?>
+                                                · <?php echo auctionStatusBadge($row["status"]); ?>
+                                            </div>
+                                        </div>
+
+                                        <div class="activity-amount">
+                                            <?php echo coins($row["principal_coins"]); ?>
+                                            <div class="text-muted" style="font-size: 12px;">
+                                                Total <?php echo coins($row["total_due_coins"]); ?>
+                                            </div>
+                                        </div>
+                                    </div>
+                                <?php endwhile; ?>
+                            <?php else: ?>
+                                <div class="text-center text-muted py-4">
+                                    No auction activity yet.
+                                </div>
+                            <?php endif; ?>
+                        </div>
                     </div>
 
-                    <div class="card-box dashboard-card-gold mt-4">
-                        <h5 class="quick-card-title">Money Snapshot</h5>
-                        <p class="text-muted" style="font-size: 13px;">
-                            Current stokvel money movement.
-                        </p>
+                    <div class="col-lg-5">
+                        <div class="card-box dashboard-card-green">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <div>
+                                    <h5 class="quick-card-title mb-1">Auction Queue</h5>
+                                    <p class="text-muted mb-0" style="font-size: 13px;">
+                                        Shares waiting for the next auction.
+                                    </p>
+                                </div>
 
-                        <div class="d-flex justify-content-between py-2 border-bottom">
-                            <span class="text-muted">Approved Returns</span>
-                            <strong><?php echo money($approved_expected_returns); ?></strong>
+                                <a href="auction.php" class="btn btn-outline-dark btn-sm">
+                                    View Queue
+                                </a>
+                            </div>
+
+                            <?php if ($queuedLots && $queuedLots->num_rows > 0): ?>
+                                <?php while ($lot = $queuedLots->fetch_assoc()): ?>
+                                    <div class="activity-item">
+                                        <div>
+                                            <div class="activity-title">
+                                                <?php if (!empty($lot["source_claim_id"])): ?>
+                                                    Sell Shares Queue
+                                                <?php else: ?>
+                                                    Scheduled Auction Lot
+                                                <?php endif; ?>
+                                            </div>
+                                            <div class="activity-meta">
+                                                Seller: <?php echo htmlspecialchars(memberDisplay($lot, "seller_")); ?>
+                                                · <?php echo htmlspecialchars(displayDate($lot["created_at"])); ?>
+                                            </div>
+                                        </div>
+
+                                        <div class="activity-amount">
+                                            <?php echo coins($lot["remaining_coins"]); ?>
+                                            <div class="text-muted" style="font-size: 12px;">
+                                                Queued
+                                            </div>
+                                        </div>
+                                    </div>
+                                <?php endwhile; ?>
+                            <?php else: ?>
+                                <div class="text-center text-muted py-4">
+                                    No queued sell shares yet.
+                                </div>
+                            <?php endif; ?>
                         </div>
 
-                        <div class="d-flex justify-content-between py-2 border-bottom">
-                            <span class="text-muted">Withdrawn / Closed</span>
-                            <strong><?php echo money($withdrawn_total); ?></strong>
-                        </div>
+                        <div class="card-box dashboard-card-gold mt-4">
+                            <h5 class="quick-card-title">Auction Snapshot</h5>
+                            <p class="text-muted" style="font-size: 13px;">
+                                Current auction movement.
+                            </p>
 
-                        <div class="d-flex justify-content-between py-2 border-bottom">
-                            <span class="text-muted">Pending Withdrawals</span>
-                            <strong><?php echo $pending_withdrawals; ?></strong>
-                        </div>
+                            <div class="d-flex justify-content-between py-2 border-bottom">
+                                <span class="text-muted">Active Claims</span>
+                                <strong><?php echo $activeClaims; ?></strong>
+                            </div>
 
-                        <div class="d-flex justify-content-between py-2">
-                            <span class="text-muted">Paid Withdrawals</span>
-                            <strong><?php echo money($paid_withdrawal_amount); ?></strong>
+                            <div class="d-flex justify-content-between py-2 border-bottom">
+                                <span class="text-muted">Matured Claims</span>
+                                <strong><?php echo $maturedClaims; ?></strong>
+                            </div>
+
+                            <div class="d-flex justify-content-between py-2 border-bottom">
+                                <span class="text-muted">Auction Value</span>
+                                <strong><?php echo coins($totalAuctionValue); ?></strong>
+                            </div>
+
+                            <div class="d-flex justify-content-between py-2">
+                                <span class="text-muted">Queued from Sell Shares</span>
+                                <strong><?php echo $queuedSellShares; ?></strong>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+
+            <?php else: ?>
+
+                <div class="admin-hero">
+                    <div class="admin-kicker">
+                        <?php echo ucfirst(htmlspecialchars($subscription_status)); ?> Account · <?php echo htmlspecialchars($trialText); ?>
+                    </div>
+
+                    <div class="package-pill">
+                        <?php echo htmlspecialchars($packageName); ?>
+                        · <?php echo number_format($returnPercent, 2); ?>%
+                        · <?php echo (int)$maturityDays; ?> days
+                    </div>
+
+                    <div class="admin-hero-title">
+                        Welcome, <?php echo htmlspecialchars($displayName); ?>
+                    </div>
+
+                    <p class="admin-hero-text">
+                        You are managing <strong><?php echo htmlspecialchars($stokvel_name); ?></strong>.
+                        Use this dashboard to approve members, verify saving requests, track withdrawals,
+                        and keep your stokvel circle organised.
+                    </p>
+
+                    <div class="hero-actions">
+                        <a href="members.php" class="btn-hero-light">
+                            Manage Members
+                        </a>
+
+                        <a href="savings_requests.php" class="btn-hero-outline">
+                            Review Savings
+                        </a>
+
+                        <a href="../group_chat.php" class="btn-hero-outline">
+                            Open Group Chat
+                        </a>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-4">
+                    <div class="col-md-3">
+                        <div class="stat-card stat-card-green">
+                            <div class="stat-label">Total Members</div>
+                            <div class="stat-value"><?php echo $total_members; ?></div>
+                            <div class="text-muted" style="font-size: 12px; position: relative; z-index: 2;">
+                                Active: <?php echo $active_members; ?>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <div class="stat-card stat-card-gold">
+                            <div class="stat-label">Pending Members</div>
+                            <div class="stat-value"><?php echo $pending_members; ?></div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <div class="stat-card stat-card-blue">
+                            <div class="stat-label">Saving Requests</div>
+                            <div class="stat-value"><?php echo $total_saving_requests; ?></div>
+                            <div class="text-muted" style="font-size: 12px; position: relative; z-index: 2;">
+                                Pending: <?php echo $pending_saving_requests; ?>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <div class="stat-card stat-card-red">
+                            <div class="stat-label">Active Balance</div>
+                            <div class="stat-value">
+                                <?php echo money($approved_expected_total); ?>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-4 mb-4">
+                    <div class="col-lg-7">
+                        <div class="card-box dashboard-card-green">
+                            <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-3">
+                                <div>
+                                    <h5 class="quick-card-title mb-1">Invite Members</h5>
+                                    <p class="text-muted mb-0" style="font-size: 13px;">
+                                        Share this link with people who must join your stokvel.
+                                    </p>
+                                </div>
+
+                                <a href="members.php" class="btn btn-outline-dark btn-sm">
+                                    Manage Members
+                                </a>
+                            </div>
+
+                            <div class="invite-panel mb-3" id="inviteLink">
+                                <?php echo htmlspecialchars($memberLink); ?>
+                            </div>
+
+                            <button class="btn btn-dark btn-sm" onclick="copyInviteLink()">
+                                Copy Registration Link
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-5">
+                        <div class="card-box dashboard-card-gold">
+                            <h5 class="quick-card-title">Today’s Focus</h5>
+                            <p class="text-muted mb-3" style="font-size: 13px;">
+                                Keep the money circle moving by approving members, verifying proof of payment,
+                                and checking withdrawals.
+                            </p>
+
+                            <div class="d-grid gap-2">
+                                <a href="members.php" class="btn btn-outline-dark">
+                                    View Members
+                                </a>
+
+                                <a href="savings_requests.php" class="btn btn-dark">
+                                    View Saving Requests
+                                </a>
+
+                                <a href="withdrawals.php" class="btn btn-outline-dark">
+                                    View Withdrawals
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-4">
+                    <div class="col-lg-7">
+                        <div class="card-box dashboard-card-mixed">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <div>
+                                    <h5 class="quick-card-title mb-1">Recent Saving Activity</h5>
+                                    <p class="text-muted mb-0" style="font-size: 13px;">
+                                        Latest member saving requests.
+                                    </p>
+                                </div>
+
+                                <a href="savings_requests.php" class="btn btn-outline-dark btn-sm">
+                                    View All
+                                </a>
+                            </div>
+
+                            <?php if ($recentSavings && $recentSavings->num_rows > 0): ?>
+                                <?php while ($row = $recentSavings->fetch_assoc()): ?>
+                                    <div class="activity-item">
+                                        <div>
+                                            <div class="activity-title">
+                                                <?php echo htmlspecialchars(memberDisplay($row)); ?>
+                                            </div>
+                                            <div class="activity-meta">
+                                                <?php echo date("d M Y H:i", strtotime($row["created_at"])); ?>
+                                                · <?php echo statusBadge($row["status"]); ?>
+                                            </div>
+                                        </div>
+
+                                        <div class="activity-amount">
+                                            <?php echo money($row["expected_total_amount"]); ?>
+                                            <div class="text-muted" style="font-size: 12px;">
+                                                Saved <?php echo money($row["amount"]); ?>
+                                            </div>
+                                        </div>
+                                    </div>
+                                <?php endwhile; ?>
+                            <?php else: ?>
+                                <div class="text-center text-muted py-4">
+                                    No saving activity yet.
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-5">
+                        <div class="card-box dashboard-card-green">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <div>
+                                    <h5 class="quick-card-title mb-1">Recent Members</h5>
+                                    <p class="text-muted mb-0" style="font-size: 13px;">
+                                        Newest people who joined your stokvel.
+                                    </p>
+                                </div>
+
+                                <a href="members.php" class="btn btn-outline-dark btn-sm">
+                                    View All
+                                </a>
+                            </div>
+
+                            <?php if ($recentMembers->num_rows > 0): ?>
+                                <?php while ($member = $recentMembers->fetch_assoc()): ?>
+                                    <div class="activity-item">
+                                        <div>
+                                            <div class="activity-title">
+                                                <?php echo htmlspecialchars(memberDisplay($member)); ?>
+                                            </div>
+                                            <div class="activity-meta">
+                                                <?php echo htmlspecialchars($member["phone"] ?: "-"); ?>
+                                                · <?php echo statusBadge($member["status"]); ?>
+                                            </div>
+                                        </div>
+
+                                        <div class="activity-amount">
+                                            <?php echo htmlspecialchars($member["member_code"] ?: "-"); ?>
+                                            <div class="text-muted" style="font-size: 12px;">
+                                                <?php echo date("d M Y", strtotime($member["created_at"])); ?>
+                                            </div>
+                                        </div>
+                                    </div>
+                                <?php endwhile; ?>
+                            <?php else: ?>
+                                <div class="text-center text-muted py-4">
+                                    No members have joined yet.
+                                </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="card-box dashboard-card-gold mt-4">
+                            <h5 class="quick-card-title">Money Snapshot</h5>
+                            <p class="text-muted" style="font-size: 13px;">
+                                Current stokvel money movement.
+                            </p>
+
+                            <div class="d-flex justify-content-between py-2 border-bottom">
+                                <span class="text-muted">Approved Returns</span>
+                                <strong><?php echo money($approved_expected_returns); ?></strong>
+                            </div>
+
+                            <div class="d-flex justify-content-between py-2 border-bottom">
+                                <span class="text-muted">Withdrawn / Closed</span>
+                                <strong><?php echo money($withdrawn_total); ?></strong>
+                            </div>
+
+                            <div class="d-flex justify-content-between py-2 border-bottom">
+                                <span class="text-muted">Pending Withdrawals</span>
+                                <strong><?php echo $pending_withdrawals; ?></strong>
+                            </div>
+
+                            <div class="d-flex justify-content-between py-2">
+                                <span class="text-muted">Paid Withdrawals</span>
+                                <strong><?php echo money($paid_withdrawal_amount); ?></strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            <?php endif; ?>
 
         </div>
     </main>
