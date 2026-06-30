@@ -70,9 +70,6 @@ $isSavingsPackage = !$isAuctionPackage;
 
 $showGroupChat = (int)($packageRules["enable_group_chat"] ?? 1) === 1;
 $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ?? 0) === 1;
-
-$sidebarTitle = $isAuctionPackage ? "CRYPTO SHARES" : "STOKVEL CIRCLE";
-$sidebarMode = $isAuctionPackage ? "Auction Package" : "Savings Package";
 ?>
 
 <button type="button" class="mobile-menu-button" onclick="toggleSidebar()" aria-label="Open menu">
@@ -83,7 +80,7 @@ $sidebarMode = $isAuctionPackage ? "Auction Package" : "Savings Package";
 
 <div class="sidebar-backdrop" onclick="closeSidebar()"></div>
 
-<aside class="app-sidebar crypto-sidebar" id="appSidebar">
+<aside class="app-sidebar crypto-sidebar compact-sidebar" id="appSidebar">
 
     <div class="sidebar-close-row">
         <button type="button" class="sidebar-close-btn" onclick="closeSidebar()" aria-label="Close menu">
@@ -91,23 +88,7 @@ $sidebarMode = $isAuctionPackage ? "Auction Package" : "Savings Package";
         </button>
     </div>
 
-    <div class="app-brand crypto-brand">
-        <div class="crypto-brand-mark">
-            <?php echo $isAuctionPackage ? "C" : "R"; ?>
-        </div>
-
-        <div>
-            <div class="app-brand-title">
-                <?php echo htmlspecialchars($sidebarTitle); ?>
-            </div>
-
-            <div class="app-brand-subtitle">
-                <?php echo htmlspecialchars($sidebarMode); ?>
-            </div>
-        </div>
-    </div>
-
-    <div class="sidebar-account-card">
+    <div class="sidebar-account-card compact-account-card">
         <div class="sidebar-account-avatar">
             <?php echo strtoupper(substr($displayUser, 0, 1)); ?>
         </div>
@@ -127,7 +108,7 @@ $sidebarMode = $isAuctionPackage ? "Auction Package" : "Savings Package";
 
         <div class="sidebar-section">
             <div class="sidebar-section-title">
-                <?php echo $isAuctionPackage ? "Auction Admin" : "Stokvel Admin"; ?>
+                <?php echo $isAuctionPackage ? "Admin" : "Admin"; ?>
             </div>
 
             <?php
@@ -163,7 +144,7 @@ $sidebarMode = $isAuctionPackage ? "Auction Package" : "Savings Package";
 
         <div class="sidebar-section">
             <div class="sidebar-section-title">
-                <?php echo $isAuctionPackage ? "My Auction" : "My Stokvel"; ?>
+                Menu
             </div>
 
             <?php
