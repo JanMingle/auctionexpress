@@ -857,7 +857,7 @@ if ($auctionStatus === "open") {
                                     </div>
 
                                     <div class="bank-line">
-                                        Banking with <?php echo htmlspecialchars($bankName); ?>
+                                         <?php echo htmlspecialchars($bankName); ?>
                                     </div>
 
                                     <div class="share-amount-row">
