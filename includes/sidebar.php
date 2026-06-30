@@ -200,15 +200,20 @@ $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ??
                     Pending Approval
                 </a>
 
-                <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction_purchases.php" class="sidebar-link <?php echo isActivePage('auction_purchases.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    My Coin Purchases
-                </a>
+              <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction_purchases.php" class="sidebar-link <?php echo isActivePage('auction_purchases.php'); ?>">
+    <span class="sidebar-dot"></span>
+    My Coin Purchases
+</a>
 
-                <a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction_history.php" class="sidebar-link <?php echo isActivePage('auction_history.php'); ?>">
-                    <span class="sidebar-dot"></span>
-                    Auction History
-                </a>
+<a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/sell_shares.php" class="sidebar-link <?php echo isActivePage('sell_shares.php'); ?>">
+    <span class="sidebar-dot"></span>
+    Sell Shares
+</a>
+
+<a href="<?php echo $appBase; ?>/<?php echo $memberFolder; ?>/auction_history.php" class="sidebar-link <?php echo isActivePage('auction_history.php'); ?>">
+    <span class="sidebar-dot"></span>
+    Auction History
+</a>
             <?php endif; ?>
 
             <?php if ($showGroupChat): ?>

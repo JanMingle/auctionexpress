@@ -651,6 +651,20 @@ $scheduledStatsStmt->bind_param("i", $tenant_id);
 $scheduledStatsStmt->execute();
 $scheduledStats = $scheduledStatsStmt->get_result()->fetch_assoc();
 
+$queuedResaleStatsStmt = $conn->prepare("
+    SELECT COALESCE(SUM(remaining_coins), 0) AS total_queued_resale
+    FROM auction_lots
+    WHERE tenant_id = ?
+    AND status = 'scheduled'
+    AND remaining_coins > 0
+    AND source_claim_id IS NOT NULL
+");
+$queuedResaleStatsStmt->bind_param("i", $tenant_id);
+$queuedResaleStatsStmt->execute();
+$queuedResaleStats = $queuedResaleStatsStmt->get_result()->fetch_assoc();
+
+$totalQueuedResale = (float)($queuedResaleStats["total_queued_resale"] ?? 0);
+
 $resaleOpenStatsStmt = $conn->prepare("
     SELECT COALESCE(SUM(remaining_coins), 0) AS total_resale_open
     FROM auction_lots
@@ -1014,8 +1028,15 @@ $packageName = $packageRules["package_name"] ?? "Auction Package";
 
                 <div class="col-lg-5">
                     <div class="card-box">
-                        <h5 class="quick-card-title mb-3">Auction Lots</h5>
-
+<div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+    <div>
+        <h5 class="quick-card-title mb-1">Auction Lots & Queue</h5>
+        <div class="text-muted small">
+            Queued sell shares waiting for next auction:
+            <strong><?php echo coins($totalQueuedResale); ?></strong>
+        </div>
+    </div>
+</div>
                         <div class="table-responsive">
                             <table class="table align-middle">
                                 <thead>
@@ -1032,9 +1053,13 @@ $packageName = $packageRules["package_name"] ?? "Auction Package";
                                             <tr>
                                                 <td>
                                                     <strong><?php echo htmlspecialchars(memberLabel($lot)); ?></strong><br>
-                                                    <small class="text-muted">
-                                                        <?php echo htmlspecialchars($lot["package_name"] ?? $packageName); ?>
-                                                    </small>
+                                                   <small class="text-muted">
+    <?php if (!empty($lot["source_claim_id"])): ?>
+        Queued from Sell Shares
+    <?php else: ?>
+        <?php echo htmlspecialchars($lot["package_name"] ?? $packageName); ?>
+    <?php endif; ?>
+</small>
                                                 </td>
 
                                                 <td><?php echo coins($lot["coin_amount"]); ?></td>
