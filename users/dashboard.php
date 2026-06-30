@@ -100,7 +100,7 @@ function statusBadge($status, $maturesAt = null) {
 
 function auctionStatusBadge($status) {
     if ($status === "pending_seller_approval") {
-        return '<span class="badge bg-warning text-dark">Pending Seller Approval</span>';
+        return '<span class="badge bg-warning text-dark">Pending Seller</span>';
     }
 
     if ($status === "active") {
@@ -176,7 +176,19 @@ $activeShare = null;
 $recentAuctionActivity = null;
 
 /*
-    Load package-specific dashboard data.
+    Extra values for crypto dashboard
+*/
+$activeMembersCount = 0;
+$nextAuctionEntries = 0;
+$nextAuctionCoins = 0;
+$sharesOnSaleCount = 0;
+$sharesOnSaleCoins = 0;
+$sharesSoldCount = 0;
+$soldSharesRevenue = 0;
+$transactionsCount = 0;
+
+/*
+    Load package-specific dashboard data
 */
 if ($isSavingsPackage) {
     $statsStmt = $conn->prepare("
@@ -416,6 +428,86 @@ if ($isSavingsPackage) {
     $recentAuctionStmt->bind_param("iii", $tenant_id, $user_id, $user_id);
     $recentAuctionStmt->execute();
     $recentAuctionActivity = $recentAuctionStmt->get_result();
+
+    /*
+        Extra crypto dashboard stats
+    */
+    $activeMembersStmt = $conn->prepare("
+        SELECT COUNT(*) AS total_active_members
+        FROM users
+        WHERE tenant_id = ?
+        AND role = 'member'
+        AND status = 'active'
+    ");
+    $activeMembersStmt->bind_param("i", $tenant_id);
+    $activeMembersStmt->execute();
+    $activeMembersRow = $activeMembersStmt->get_result()->fetch_assoc();
+    $activeMembersCount = (int)($activeMembersRow["total_active_members"] ?? 0);
+
+    $nextAuctionStmt = $conn->prepare("
+        SELECT 
+            COUNT(*) AS total_entries,
+            COALESCE(SUM(remaining_coins), 0) AS total_coins
+        FROM auction_lots
+        WHERE tenant_id = ?
+        AND status = 'scheduled'
+        AND remaining_coins > 0
+    ");
+    $nextAuctionStmt->bind_param("i", $tenant_id);
+    $nextAuctionStmt->execute();
+    $nextAuctionRow = $nextAuctionStmt->get_result()->fetch_assoc();
+
+    $nextAuctionEntries = (int)($nextAuctionRow["total_entries"] ?? 0);
+    $nextAuctionCoins = (float)($nextAuctionRow["total_coins"] ?? 0);
+
+    $sharesOnSaleStmt = $conn->prepare("
+        SELECT 
+            COUNT(*) AS total_on_sale,
+            COALESCE(SUM(remaining_coins), 0) AS coins_on_sale
+        FROM auction_lots
+        WHERE tenant_id = ?
+        AND seller_user_id = ?
+        AND source_claim_id IS NOT NULL
+        AND status IN ('scheduled', 'open')
+        AND remaining_coins > 0
+    ");
+    $sharesOnSaleStmt->bind_param("ii", $tenant_id, $user_id);
+    $sharesOnSaleStmt->execute();
+    $sharesOnSaleRow = $sharesOnSaleStmt->get_result()->fetch_assoc();
+
+    $sharesOnSaleCount = (int)($sharesOnSaleRow["total_on_sale"] ?? 0);
+    $sharesOnSaleCoins = (float)($sharesOnSaleRow["coins_on_sale"] ?? 0);
+
+    $soldSharesStmt = $conn->prepare("
+        SELECT 
+            COUNT(*) AS total_sold,
+            COALESCE(SUM(principal_coins), 0) AS revenue
+        FROM auction_claims
+        WHERE tenant_id = ?
+        AND seller_user_id = ?
+        AND status NOT IN ('pending_seller_approval', 'rejected', 'cancelled')
+    ");
+    $soldSharesStmt->bind_param("ii", $tenant_id, $user_id);
+    $soldSharesStmt->execute();
+    $soldSharesRow = $soldSharesStmt->get_result()->fetch_assoc();
+
+    $sharesSoldCount = (int)($soldSharesRow["total_sold"] ?? 0);
+    $soldSharesRevenue = (float)($soldSharesRow["revenue"] ?? 0);
+
+    $transactionsStmt = $conn->prepare("
+        SELECT COUNT(*) AS total_transactions
+        FROM auction_claims
+        WHERE tenant_id = ?
+        AND (
+            buyer_user_id = ?
+            OR seller_user_id = ?
+        )
+    ");
+    $transactionsStmt->bind_param("iii", $tenant_id, $user_id, $user_id);
+    $transactionsStmt->execute();
+    $transactionsRow = $transactionsStmt->get_result()->fetch_assoc();
+
+    $transactionsCount = (int)($transactionsRow["total_transactions"] ?? 0);
 }
 ?>
 
@@ -670,6 +762,361 @@ if ($isSavingsPackage) {
                 top: 18px;
             }
         }
+
+        <?php if ($isAuctionPackage): ?>
+        body {
+            background:
+                radial-gradient(circle at 20% 0%, rgba(69, 90, 145, 0.22), transparent 34%),
+                linear-gradient(180deg, #0d1829 0%, #101a2c 50%, #0b1424 100%) !important;
+            color: rgba(255,255,255,0.86);
+        }
+
+        .app-main {
+            background:
+                radial-gradient(circle at 85% 5%, rgba(168, 59, 216, 0.12), transparent 30%),
+                linear-gradient(180deg, #0d1829 0%, #101a2c 100%) !important;
+        }
+
+        .app-topbar {
+            background:
+                linear-gradient(rgba(13,24,41,0.84), rgba(13,24,41,0.90)),
+                radial-gradient(circle at top right, rgba(59,130,246,0.16), transparent 34%) !important;
+            border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+            color: #ffffff;
+        }
+
+        .app-topbar-title,
+        .app-topbar-subtitle {
+            color: rgba(255,255,255,0.88) !important;
+        }
+
+        .app-content::before {
+            display: none !important;
+        }
+
+        .crypto-dashboard {
+            max-width: 1180px;
+            margin: 0 auto;
+        }
+
+        .crypto-page-title {
+            font-size: 30px;
+            font-weight: 400;
+            color: rgba(255,255,255,0.72);
+            margin-bottom: 20px;
+        }
+
+        .crypto-top-cover {
+            min-height: 115px;
+            border-radius: 3px;
+            background:
+                linear-gradient(rgba(13,24,41,0.70), rgba(13,24,41,0.94)),
+                radial-gradient(circle at right top, rgba(16,185,129,0.14), transparent 30%),
+                linear-gradient(135deg, #162239, #0d1829);
+            border: 1px solid rgba(255,255,255,0.06);
+            margin-bottom: 20px;
+            padding: 22px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .crypto-top-cover::after {
+            content: "";
+            position: absolute;
+            right: 28px;
+            top: 22px;
+            width: 46px;
+            height: 32px;
+            border-top: 4px solid rgba(255,255,255,0.35);
+            border-bottom: 4px solid rgba(255,255,255,0.35);
+        }
+
+        .crypto-online-banner {
+            background: linear-gradient(135deg, #ff9800, #ff7a00);
+            color: #ffffff;
+            border-radius: 5px;
+            padding: 18px 22px;
+            font-size: 18px;
+            margin-bottom: 22px;
+            box-shadow: 0 18px 35px rgba(255,122,0,0.16);
+        }
+
+        .crypto-auction-panel {
+            background: rgba(22, 34, 57, 0.78);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 4px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .crypto-auction-title {
+            font-size: 30px;
+            font-weight: 300;
+            color: rgba(255,255,255,0.62);
+            margin-bottom: 6px;
+        }
+
+        .crypto-auction-subtitle {
+            color: rgba(255,255,255,0.32);
+            font-size: 17px;
+            margin-bottom: 26px;
+        }
+
+        .crypto-countdown-row {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            color: rgba(255,255,255,0.72);
+            font-size: 17px;
+        }
+
+        .crypto-dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 26px;
+            margin-bottom: 26px;
+        }
+
+        .crypto-dashboard-card {
+            background: rgba(25, 39, 64, 0.86);
+            border: 1px solid rgba(255,255,255,0.045);
+            border-radius: 5px;
+            min-height: 165px;
+            padding: 22px 22px 18px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 24px 42px rgba(0,0,0,0.16);
+        }
+
+        .crypto-icon-tile {
+            position: absolute;
+            left: 24px;
+            top: -1px;
+            width: 112px;
+            height: 112px;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            font-size: 54px;
+            font-weight: 300;
+            box-shadow: 0 16px 30px rgba(0,0,0,0.16);
+        }
+
+        .crypto-icon-tile.cyan {
+            background: linear-gradient(135deg, #00c6d7, #11a7d8);
+        }
+
+        .crypto-icon-tile.green {
+            background: linear-gradient(135deg, #31b96f, #15905a);
+        }
+
+        .crypto-icon-tile.red {
+            background: linear-gradient(135deg, #ff4338, #e92820);
+        }
+
+        .crypto-icon-tile.orange {
+            background: linear-gradient(135deg, #ff9800, #ff7a00);
+        }
+
+        .crypto-card-main {
+            min-height: 105px;
+            padding-left: 132px;
+            text-align: right;
+        }
+
+        .crypto-card-label {
+            color: rgba(255,255,255,0.50);
+            font-size: 18px;
+            margin-bottom: 5px;
+        }
+
+        .crypto-card-value {
+            color: rgba(255,255,255,0.50);
+            font-size: 31px;
+            font-weight: 300;
+            line-height: 1.15;
+        }
+
+        .crypto-card-secondary {
+            margin-top: 22px;
+        }
+
+        .crypto-card-footer {
+            border-top: 1px solid rgba(255,255,255,0.055);
+            padding-top: 16px;
+            color: rgba(255,255,255,0.45);
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 9px;
+        }
+
+        .next-auction-card {
+            padding-top: 36px;
+            margin-bottom: 26px;
+        }
+
+        .next-auction-ribbon {
+            position: absolute;
+            top: -1px;
+            left: 26px;
+            background: linear-gradient(135deg, #32b96e, #1b9e5f);
+            color: #ffffff;
+            border-radius: 4px;
+            padding: 20px 24px;
+            min-width: 245px;
+            font-weight: 900;
+            font-style: italic;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            box-shadow: 0 18px 30px rgba(27,158,95,0.20);
+        }
+
+        .next-auction-body {
+            text-align: right;
+            padding-left: 260px;
+            min-height: 100px;
+        }
+
+        .crypto-offers-card {
+            background: rgba(25, 39, 64, 0.86);
+            border: 1px solid rgba(255,255,255,0.045);
+            border-radius: 5px;
+            overflow: hidden;
+            margin-bottom: 24px;
+        }
+
+        .crypto-offers-heading {
+            background: linear-gradient(135deg, #a83bd8, #c447f0);
+            color: #ffffff;
+            padding: 24px 28px;
+        }
+
+        .crypto-offers-heading h4 {
+            margin: 0 0 8px;
+            font-size: 24px;
+            font-weight: 400;
+        }
+
+        .crypto-offers-heading p {
+            margin: 0;
+            color: rgba(255,255,255,0.70);
+        }
+
+        .crypto-offers-table {
+            width: 100%;
+            color: rgba(255,255,255,0.58);
+            font-size: 14px;
+        }
+
+        .crypto-offers-table th {
+            color: rgba(255,255,255,0.50);
+            font-size: 15px;
+            font-weight: 500;
+            padding: 18px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.055);
+        }
+
+        .crypto-offers-table td {
+            padding: 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.045);
+        }
+
+        .crypto-empty {
+            padding: 28px;
+            text-align: center;
+            color: rgba(255,255,255,0.42);
+        }
+
+        .crypto-action-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .crypto-action {
+            border: 1px solid rgba(255,255,255,0.10);
+            background: rgba(255,255,255,0.045);
+            color: rgba(255,255,255,0.76);
+            text-decoration: none;
+            border-radius: 5px;
+            padding: 13px 16px;
+            font-weight: 700;
+        }
+
+        .crypto-action:hover {
+            background: rgba(255,255,255,0.08);
+            color: #ffffff;
+        }
+
+        @media (max-width: 1100px) {
+            .crypto-dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 700px) {
+            .crypto-page-title {
+                font-size: 27px;
+            }
+
+            .crypto-top-cover {
+                margin-top: 4px;
+            }
+
+            .crypto-dashboard-grid {
+                gap: 22px;
+            }
+
+            .crypto-dashboard-card {
+                min-height: 180px;
+            }
+
+            .crypto-icon-tile {
+                width: 104px;
+                height: 104px;
+                left: 24px;
+                font-size: 48px;
+            }
+
+            .crypto-card-main {
+                padding-left: 125px;
+            }
+
+            .crypto-card-label {
+                font-size: 17px;
+            }
+
+            .crypto-card-value {
+                font-size: 28px;
+            }
+
+            .next-auction-ribbon {
+                position: relative;
+                left: auto;
+                top: auto;
+                display: inline-block;
+                min-width: 0;
+                margin-bottom: 20px;
+            }
+
+            .next-auction-body {
+                padding-left: 0;
+                text-align: right;
+            }
+
+            .crypto-offers-table {
+                min-width: 650px;
+            }
+
+            .crypto-offers-scroll {
+                overflow-x: auto;
+            }
+        }
+        <?php endif; ?>
     </style>
 </head>
 <body>
@@ -686,7 +1133,7 @@ if ($isSavingsPackage) {
                 </div>
                 <div class="app-topbar-subtitle">
                     <?php if ($isAuctionPackage): ?>
-                        Track your coin purchases, seller approvals, shares, and auction queue.
+                        Track your shares, offers, purchases, and next auction entries.
                     <?php else: ?>
                         Track your savings circle, returns, and withdrawals.
                     <?php endif; ?>
@@ -698,250 +1145,218 @@ if ($isSavingsPackage) {
 
             <?php if ($isAuctionPackage): ?>
 
-                <div class="member-hero">
-                    <div class="hero-kicker">
-                        <?php echo htmlspecialchars($stokvel_name); ?>
+                <div class="crypto-dashboard">
+
+                    <div class="crypto-page-title">
+                        Dashboard
                     </div>
 
-                    <div class="package-pill">
-                        <?php echo htmlspecialchars($packageName); ?>
-                        · <?php echo number_format($returnPercent, 2); ?>%
-                        · <?php echo (int)$maturityDays; ?> days
+                    <div class="crypto-top-cover">
+                        <div style="color: rgba(255,255,255,0.42); font-size: 13px;">
+                            <?php echo htmlspecialchars($stokvel_name); ?>
+                        </div>
                     </div>
 
-                    <div class="member-hero-title">
-                        Welcome, <?php echo htmlspecialchars($displayName); ?>
+                    <div class="crypto-online-banner">
+                        Users Online <?php echo (int)$activeMembersCount; ?>
                     </div>
 
-                    <p class="member-hero-text">
-                        This is your auction dashboard. Buy coins from other members, track seller approvals,
-                        watch your approved shares mature, and sell matured shares back into the auction queue.
-                    </p>
+                    <div class="crypto-auction-panel">
+                        <div class="crypto-auction-title">
+                            Auction
+                        </div>
 
-                    <div class="hero-actions">
-                        <a href="auction.php" class="btn-hero-light">
-                            Open Auction
-                        </a>
+                        <div class="crypto-auction-subtitle">
+                            Our current package return is 
+                            <?php echo number_format($returnPercent, 2); ?>%
+                            over <?php echo (int)$maturityDays; ?> days.
+                        </div>
 
-                        <a href="auction_purchases.php" class="btn-hero-outline">
-                            My Coin Purchases
-                        </a>
-
-                        <a href="sell_shares.php" class="btn-hero-outline">
-                            Sell Shares
-                        </a>
-
-                        <a href="auction_history.php" class="btn-hero-outline">
-                            Auction History
-                        </a>
-                    </div>
-                </div>
-
-                <?php if ($activeShare): ?>
-                    <div class="saving-focus-card">
-                        <div class="focus-grid">
-                            <div>
-                                <div class="focus-title">
-                                    Your share is counting down
-                                </div>
-                                <p class="focus-text">
-                                    You bought <strong><?php echo coins($activeShare["principal_coins"]); ?></strong>.
-                                    Your expected return is 
-                                    <strong><?php echo coins($activeShare["return_coins"]); ?></strong>,
-                                    giving you a sell value of
-                                    <strong><?php echo coins($activeShare["total_due_coins"]); ?></strong>.
-                                </p>
-                            </div>
-
-                            <div class="countdown-panel">
-                                <div class="countdown-label">Ready to sell in</div>
-                                <div 
-                                    class="countdown-time js-countdown"
+                        <?php if ($activeShare): ?>
+                            <div class="crypto-countdown-row">
+                                <span>◷</span>
+                                <span 
+                                    class="js-countdown"
                                     data-target="<?php echo htmlspecialchars(date("c", strtotime($activeShare["matures_at"]))); ?>"
                                 >
                                     Calculating...
-                                </div>
-
-                                <div class="text-muted mt-1" style="font-size: 12px;">
-                                    Maturity date: <?php echo date("d M Y H:i", strtotime($activeShare["matures_at"])); ?>
-                                </div>
+                                </span>
                             </div>
-                        </div>
-                    </div>
-                <?php else: ?>
-                    <div class="saving-focus-card">
-                        <div class="focus-grid">
-                            <div>
-                                <div class="focus-title">
-                                    <?php echo $maturedShares > 0 ? "You have shares ready to sell" : "Ready to buy auction coins?"; ?>
-                                </div>
-                                <p class="focus-text">
-                                    <?php if ($maturedShares > 0): ?>
-                                        Some of your approved shares have completed their countdown. You can list them into the next auction queue.
-                                    <?php else: ?>
-                                        Buy coins from the auction. Once the seller approves, your countdown starts and you can sell the matured shares later.
-                                    <?php endif; ?>
-                                </p>
+                        <?php else: ?>
+                            <div class="crypto-countdown-row">
+                                <span>◷</span>
+                                <span>No active countdown yet</span>
                             </div>
-
-                            <div class="text-lg-end">
-                                <?php if ($maturedShares > 0): ?>
-                                    <a href="sell_shares.php" class="btn btn-dark">
-                                        Sell Matured Shares
-                                    </a>
-                                <?php else: ?>
-                                    <a href="auction.php" class="btn btn-dark">
-                                        Go to Auction
-                                    </a>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                    </div>
-                <?php endif; ?>
-
-                <div class="row g-3 mb-4">
-                    <div class="col-md-3">
-                        <div class="stat-card stat-card-green">
-                            <div class="stat-label">Pending Purchases</div>
-                            <div class="stat-value"><?php echo $pendingBuyerPurchases; ?></div>
-                        </div>
+                        <?php endif; ?>
                     </div>
 
-                    <div class="col-md-3">
-                        <div class="stat-card stat-card-gold">
-                            <div class="stat-label">Active Shares</div>
-                            <div class="stat-value"><?php echo $activeShares; ?></div>
-                        </div>
+                    <div class="crypto-action-row">
+                        <a href="auction.php" class="crypto-action">Open Auction</a>
+                        <a href="auction_purchases.php" class="crypto-action">My Coin Purchases</a>
+                        <a href="auction_pending_approval.php" class="crypto-action">Pending Shares</a>
+                        <a href="sell_shares.php" class="crypto-action">Sell Shares</a>
+                        <a href="auction_history.php" class="crypto-action">Auction History</a>
                     </div>
 
-                    <div class="col-md-3">
-                        <div class="stat-card stat-card-blue">
-                            <div class="stat-label">Ready to Sell</div>
-                            <div class="stat-value"><?php echo $maturedShares; ?></div>
-                        </div>
-                    </div>
+                    <div class="crypto-dashboard-grid">
 
-                    <div class="col-md-3">
-                        <div class="stat-card stat-card-red">
-                            <div class="stat-label">Queued Sales</div>
-                            <div class="stat-value"><?php echo $queuedSales; ?></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="row g-4">
-                    <div class="col-lg-7">
-                        <div class="card-box card-box-soft-green">
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <div>
-                                    <h5 class="quick-card-title mb-1">Recent Auction Activity</h5>
-                                    <p class="text-muted mb-0" style="font-size: 13px;">
-                                        Latest coins you bought or sold.
-                                    </p>
-                                </div>
-
-                                <a href="auction_history.php" class="btn btn-outline-dark btn-sm">
-                                    View All
-                                </a>
+                        <div class="crypto-dashboard-card">
+                            <div class="crypto-icon-tile orange">
+                                ▣
                             </div>
 
-                            <?php if ($recentAuctionActivity && $recentAuctionActivity->num_rows > 0): ?>
-                                <?php while ($row = $recentAuctionActivity->fetch_assoc()): ?>
-                                    <?php
-                                        $isBuyer = (int)$row["buyer_user_id"] === $user_id;
-                                        $title = $isBuyer ? "You bought coins" : "You sold coins";
-                                        $otherMember = $isBuyer
-                                            ? memberLabel($row, "seller_")
-                                            : memberLabel($row, "buyer_");
-                                    ?>
+                            <div class="crypto-card-main">
+                                <div class="crypto-card-label">
+                                    Pending Shares
+                                </div>
+                                <div class="crypto-card-value">
+                                    <?php echo money($pendingPurchaseAmount); ?> ZAR
+                                </div>
+                            </div>
 
-                                    <div class="request-item">
-                                        <div>
-                                            <div class="request-title">
-                                                <?php echo htmlspecialchars($title); ?>
-                                            </div>
-                                            <div class="request-meta">
-                                                <?php echo htmlspecialchars(displayDate($row["claimed_at"])); ?>
-                                                · <?php echo auctionStatusBadge($row["status"]); ?>
-                                                · <?php echo htmlspecialchars($otherMember); ?>
-                                            </div>
-                                        </div>
+                            <div class="crypto-card-footer">
+                                ⚠ Complete order
+                            </div>
+                        </div>
 
-                                        <div class="request-amount">
-                                            <?php echo coins($row["principal_coins"]); ?>
-                                            <div class="text-muted" style="font-size: 12px;">
-                                                Total <?php echo coins($row["total_due_coins"]); ?>
-                                            </div>
-                                        </div>
+                        <div class="crypto-dashboard-card">
+                            <div class="crypto-icon-tile green">
+                                ▬
+                            </div>
+
+                            <div class="crypto-card-main">
+                                <div class="crypto-card-label">
+                                    Revenue
+                                </div>
+                                <div class="crypto-card-value">
+                                    <?php echo money($soldSharesRevenue); ?>
+                                </div>
+                            </div>
+
+                            <div class="crypto-card-footer">
+                                ▣ Total Shares Sold: <?php echo (int)$sharesSoldCount; ?>
+                            </div>
+                        </div>
+
+                        <div class="crypto-dashboard-card">
+                            <div class="crypto-icon-tile red">
+                                ⓘ
+                            </div>
+
+                            <div class="crypto-card-main">
+                                <div class="crypto-card-label">
+                                    Transactions
+                                </div>
+                                <div class="crypto-card-value">
+                                    <?php echo (int)$transactionsCount; ?>
+                                </div>
+                            </div>
+
+                            <div class="crypto-card-footer">
+                                ◆ Shares I bought: <?php echo (int)$totalBought; ?>
+                            </div>
+                        </div>
+
+                        <div class="crypto-dashboard-card">
+                            <div class="crypto-icon-tile cyan">
+                                $
+                            </div>
+
+                            <div class="crypto-card-main">
+                                <div class="crypto-card-label">
+                                    My Net Shares
+                                </div>
+                                <div class="crypto-card-value">
+                                    <?php echo money($shareValue); ?>
+                                </div>
+
+                                <div class="crypto-card-secondary">
+                                    <div class="crypto-card-label">
+                                        My Bonuses
                                     </div>
-                                <?php endwhile; ?>
-                            <?php else: ?>
-                                <div class="text-center text-muted py-4">
-                                    No auction activity yet. Start by buying coins from the auction.
+                                    <div class="crypto-card-value">
+                                        <?php echo money($walletEarned); ?>
+                                    </div>
                                 </div>
-                            <?php endif; ?>
+                            </div>
+
+                            <div class="crypto-card-footer">
+                                ⟳ Just Updated
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <div class="crypto-dashboard-card next-auction-card">
+                        <div class="next-auction-ribbon">
+                            Next Auction Entries
+                        </div>
+
+                        <div class="next-auction-body">
+                            <div class="crypto-card-label">
+                                You can participate in event
+                            </div>
+
+                            <div class="crypto-card-value">
+                                <?php echo money($nextAuctionCoins); ?>
+                            </div>
+                        </div>
+
+                        <div class="crypto-card-footer">
+                            ◆ You have <?php echo (int)$sharesOnSaleCount; ?> share(s) on sale.
                         </div>
                     </div>
 
-                    <div class="col-lg-5">
-                        <div class="card-box card-box-soft-gold mb-4">
-                            <h5 class="quick-card-title">Auction Snapshot</h5>
-                            <p class="text-muted" style="font-size: 13px;">
-                                Your current auction position.
-                            </p>
-
-                            <div class="d-flex justify-content-between py-2 border-bottom">
-                                <span class="text-muted">Pending Buyer Payments</span>
-                                <strong><?php echo coins($pendingPurchaseAmount); ?></strong>
-                            </div>
-
-                            <div class="d-flex justify-content-between py-2 border-bottom">
-                                <span class="text-muted">Share Value</span>
-                                <strong><?php echo coins($shareValue); ?></strong>
-                            </div>
-
-                            <div class="d-flex justify-content-between py-2 border-bottom">
-                                <span class="text-muted">Seller Approvals</span>
-                                <strong><?php echo $pendingSellerApprovals; ?></strong>
-                            </div>
-
-                            <div class="d-flex justify-content-between py-2">
-                                <span class="text-muted">Seller Coins Pending</span>
-                                <strong><?php echo coins($pendingSellerCoins); ?></strong>
-                            </div>
+                    <div class="crypto-offers-card">
+                        <div class="crypto-offers-heading">
+                            <h4>Offers</h4>
+                            <p>Offers to buy shares you placed on sale</p>
                         </div>
 
-                        <div class="card-box card-box-soft-mixed">
-                            <h5 class="quick-card-title">Quick Actions</h5>
-                            <p class="text-muted" style="font-size: 13px;">
-                                Continue your auction journey.
-                            </p>
+                        <div class="crypto-offers-scroll">
+                            <table class="crypto-offers-table">
+                                <thead>
+                                    <tr>
+                                        <th>Bidder</th>
+                                        <th>Contact</th>
+                                        <th>Bid Amount</th>
+                                        <th>Bid Time</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
 
-                            <div class="d-grid gap-2">
-                                <a href="auction.php" class="btn btn-dark">
-                                    Open Auction
-                                </a>
+                                <tbody>
+                                    <?php if ($recentAuctionActivity && $recentAuctionActivity->num_rows > 0): ?>
+                                        <?php while ($row = $recentAuctionActivity->fetch_assoc()): ?>
+                                            <?php
+                                                $isBuyer = (int)$row["buyer_user_id"] === $user_id;
+                                                $otherMember = $isBuyer
+                                                    ? memberLabel($row, "seller_")
+                                                    : memberLabel($row, "buyer_");
+                                            ?>
 
-                                <a href="auction_purchases.php" class="btn btn-outline-dark">
-                                    My Coin Purchases
-                                </a>
-
-                                <a href="auction_pending_approval.php" class="btn btn-outline-dark">
-                                    Pending Approval
-                                    <?php if ($pendingSellerApprovals > 0): ?>
-                                        (<?php echo $pendingSellerApprovals; ?>)
+                                            <tr>
+                                                <td><?php echo htmlspecialchars($otherMember); ?></td>
+                                                <td><?php echo $isBuyer ? "Seller" : "Buyer"; ?></td>
+                                                <td><?php echo money($row["principal_coins"]); ?></td>
+                                                <td><?php echo htmlspecialchars(displayDate($row["claimed_at"])); ?></td>
+                                                <td><?php echo auctionStatusBadge($row["status"]); ?></td>
+                                            </tr>
+                                        <?php endwhile; ?>
+                                    <?php else: ?>
+                                        <tr>
+                                            <td colspan="5">
+                                                <div class="crypto-empty">
+                                                    No offers or auction transactions yet.
+                                                </div>
+                                            </td>
+                                        </tr>
                                     <?php endif; ?>
-                                </a>
-
-                                <a href="sell_shares.php" class="btn btn-outline-dark">
-                                    Sell Shares
-                                    <?php if ($maturedShares > 0): ?>
-                                        (<?php echo $maturedShares; ?> ready)
-                                    <?php endif; ?>
-                                </a>
-                            </div>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
+
                 </div>
 
             <?php else: ?>
@@ -1185,7 +1600,7 @@ function updateCountdowns() {
         const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
         const seconds = Math.floor((distance % (1000 * 60)) / 1000);
 
-        item.textContent = days + "d " + hours + "h " + minutes + "m " + seconds + "s";
+        item.textContent = days + " Hour(s) " + minutes + " Minute(s) " + seconds + " Seconds";
     });
 }
 
