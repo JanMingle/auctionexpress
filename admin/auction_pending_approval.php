@@ -25,9 +25,40 @@ $error = "";
 
 $packageRules = getTenantPackageRules($conn, $tenant_id);
 
+/*
+    Always use the latest Owner Package values.
+    This page is for seller/admin approval, so the return shown and approved
+    must come from packages.return_rate_percent and packages.maturity_days.
+*/
 $current_package_id = (int)($packageRules["package_id"] ?? 0);
 $current_return_percent = (float)($packageRules["return_rate_percent"] ?? 0);
 $current_maturity_days = (int)($packageRules["maturity_days"] ?? 0);
+
+$directPackageStmt = $conn->prepare("
+    SELECT 
+        p.id,
+        p.package_name,
+        p.return_rate_percent,
+        p.maturity_days,
+        p.minimum_saving_amount
+    FROM tenants t
+    INNER JOIN packages p ON p.id = t.package_id
+    WHERE t.id = ?
+    LIMIT 1
+");
+$directPackageStmt->bind_param("i", $tenant_id);
+$directPackageStmt->execute();
+$directPackage = $directPackageStmt->get_result()->fetch_assoc();
+
+if ($directPackage) {
+    $current_package_id = (int)$directPackage["id"];
+    $current_return_percent = (float)$directPackage["return_rate_percent"];
+    $current_maturity_days = (int)$directPackage["maturity_days"];
+}
+
+if ($current_return_percent < 0) {
+    $current_return_percent = 0;
+}
 
 if ($current_maturity_days <= 0) {
     $current_maturity_days = 30;
@@ -635,6 +666,13 @@ $queryStringBase = http_build_query([
                 </p>
             </div>
 
+            <div class="mt-2 small">
+    Current Package Return:
+    <strong><?php echo number_format($current_return_percent, 2); ?>%</strong>
+    over
+    <strong><?php echo (int)$current_maturity_days; ?> days</strong>
+</div>
+
             <div class="auction-tabs">
                 <a href="auction_pending_approval.php" class="auction-tab active">Pending Approval</a>
                 <a href="auction_purchase_history.php" class="auction-tab">History</a>
@@ -730,9 +768,10 @@ $queryStringBase = http_build_query([
 
                                         <td><?php echo coins($p["principal_coins"]); ?></td>
 
-                                     <?php
+                      <?php
     /*
         Display using current Owner Package percentage.
+        This avoids showing old saved return values.
     */
     $displayPrincipal = (float)$p["principal_coins"];
     $displayReturnPercent = $current_return_percent;
