@@ -181,6 +181,13 @@ $recentAuctionActivity = null;
 $activeMembersCount = 0;
 $nextAuctionEntries = 0;
 $nextAuctionCoins = 0;
+
+$auctionStatus = "closed";
+$totalLiveCoins = 0;
+$totalNextCoins = 0;
+$displayAuctionCoins = 0;
+$auctionCoinsLabel = "Available Auction Coins";
+
 $sharesOnSaleCount = 0;
 $sharesOnSaleCoins = 0;
 $sharesSoldCount = 0;
@@ -444,21 +451,80 @@ if ($isSavingsPackage) {
     $activeMembersRow = $activeMembersStmt->get_result()->fetch_assoc();
     $activeMembersCount = (int)($activeMembersRow["total_active_members"] ?? 0);
 
-    $nextAuctionStmt = $conn->prepare("
-        SELECT 
-            COUNT(*) AS total_entries,
-            COALESCE(SUM(remaining_coins), 0) AS total_coins
-        FROM auction_lots
-        WHERE tenant_id = ?
-        AND status = 'scheduled'
-        AND remaining_coins > 0
-    ");
-    $nextAuctionStmt->bind_param("i", $tenant_id);
-    $nextAuctionStmt->execute();
-    $nextAuctionRow = $nextAuctionStmt->get_result()->fetch_assoc();
+ /*
+    Match the same available auction coins logic used on users/auction.php.
+    If auction is open, show live auction coins.
+    If auction is closed, show next auction available coins from active member wallets.
+*/
 
-    $nextAuctionEntries = (int)($nextAuctionRow["total_entries"] ?? 0);
-    $nextAuctionCoins = (float)($nextAuctionRow["total_coins"] ?? 0);
+$auctionStatusStmt = $conn->prepare("
+    SELECT auction_status
+    FROM tenants
+    WHERE id = ?
+    LIMIT 1
+");
+$auctionStatusStmt->bind_param("i", $tenant_id);
+$auctionStatusStmt->execute();
+$auctionStatusRow = $auctionStatusStmt->get_result()->fetch_assoc();
+
+$auctionStatus = $auctionStatusRow["auction_status"] ?? "closed";
+
+$liveStatsStmt = $conn->prepare("
+    SELECT 
+        COUNT(*) AS total_entries,
+        COALESCE(SUM(remaining_coins), 0) AS total_live_coins
+    FROM auction_lots
+    WHERE tenant_id = ?
+    AND status = 'open'
+    AND remaining_coins > 0
+");
+$liveStatsStmt->bind_param("i", $tenant_id);
+$liveStatsStmt->execute();
+$liveStats = $liveStatsStmt->get_result()->fetch_assoc();
+
+$totalLiveEntries = (int)($liveStats["total_entries"] ?? 0);
+$totalLiveCoins = (float)($liveStats["total_live_coins"] ?? 0);
+
+$nextStatsStmt = $conn->prepare("
+    SELECT COALESCE(SUM(member_coin_wallets.available_coins), 0) AS total_next_coins
+    FROM users
+    LEFT JOIN member_coin_wallets
+        ON member_coin_wallets.user_id = users.id
+        AND member_coin_wallets.tenant_id = users.tenant_id
+    WHERE users.tenant_id = ?
+    AND users.role = 'member'
+    AND users.status = 'active'
+");
+$nextStatsStmt->bind_param("i", $tenant_id);
+$nextStatsStmt->execute();
+$nextStats = $nextStatsStmt->get_result()->fetch_assoc();
+
+$totalNextCoins = (float)($nextStats["total_next_coins"] ?? 0);
+
+$scheduledEntriesStmt = $conn->prepare("
+    SELECT COUNT(*) AS total_scheduled_entries
+    FROM auction_lots
+    WHERE tenant_id = ?
+    AND status = 'scheduled'
+    AND remaining_coins > 0
+");
+$scheduledEntriesStmt->bind_param("i", $tenant_id);
+$scheduledEntriesStmt->execute();
+$scheduledEntriesRow = $scheduledEntriesStmt->get_result()->fetch_assoc();
+
+$totalScheduledEntries = (int)($scheduledEntriesRow["total_scheduled_entries"] ?? 0);
+
+if ($auctionStatus === "open") {
+    $displayAuctionCoins = $totalLiveCoins;
+    $nextAuctionEntries = $totalLiveEntries;
+    $auctionCoinsLabel = "Available Auction Coins";
+} else {
+    $displayAuctionCoins = $totalNextCoins;
+    $nextAuctionEntries = $totalScheduledEntries;
+    $auctionCoinsLabel = "Next Auction Available Coins";
+}
+
+$nextAuctionCoins = $displayAuctionCoins;
 
     $sharesOnSaleStmt = $conn->prepare("
         SELECT 
@@ -1293,18 +1359,19 @@ if ($isSavingsPackage) {
                         </div>
 
                         <div class="next-auction-body">
-                            <div class="crypto-card-label">
-                                You can participate in event
-                            </div>
+                           <div class="crypto-card-label">
+    <?php echo htmlspecialchars($auctionCoinsLabel); ?>
+</div>
 
-                            <div class="crypto-card-value">
-                                <?php echo money($nextAuctionCoins); ?>
-                            </div>
+<div class="crypto-card-value">
+    <?php echo number_format($displayAuctionCoins, 2); ?> shares
+</div>
                         </div>
 
-                        <div class="crypto-card-footer">
-                            ◆ You have <?php echo (int)$sharesOnSaleCount; ?> share(s) on sale.
-                        </div>
+                      <div class="crypto-card-footer">
+    ◆ Auction status: <?php echo strtoupper(htmlspecialchars($auctionStatus)); ?>
+    · Entries: <?php echo (int)$nextAuctionEntries; ?>
+</div>
                     </div>
 
                     <div class="crypto-offers-card">
