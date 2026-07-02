@@ -8,19 +8,30 @@ if (!isset($_SESSION["user_id"])) {
     exit;
 }
 
-if ($_SESSION["role"] !== "member") {
+if ($_SESSION["role"] === "owner" || $_SESSION["role"] === "admin") {
     header("Location: ../admin/dashboard.php");
     exit;
 }
 
 $user_id = (int)$_SESSION["user_id"];
 $tenant_id = (int)$_SESSION["tenant_id"];
+
 $packageRules = getTenantPackageRules($conn, $tenant_id);
 
-$enable_referrals = (int)$packageRules["enable_referrals"];
-$enable_bonus_claims = (int)$packageRules["enable_bonus_claims"];
-$minimum_claim_amount = (float)$packageRules["bonus_claim_minimum"];
-$stokvel_name = $_SESSION["stokvel_name"] ?? "Stokvel";
+$isAuctionPackage = function_exists("packageIsAuction")
+    ? packageIsAuction($packageRules)
+    : (($packageRules["package_type"] ?? "savings") === "auction");
+
+$enable_referrals = $isAuctionPackage || ((int)($packageRules["enable_referrals"] ?? 0) === 1);
+$enable_bonus_claims = (int)($packageRules["enable_bonus_claims"] ?? 1);
+$minimum_claim_amount = (float)($packageRules["bonus_claim_minimum"] ?? 0);
+$referralPercent = (float)(
+    $packageRules["referral_bonus_percent"]
+    ?? $packageRules["recruitment_bonus_percent"]
+    ?? 5
+);
+
+$stokvel_name = $_SESSION["stokvel_name"] ?? "Auction Express";
 $username = $_SESSION["username"] ?? "";
 $member_code = $_SESSION["member_code"] ?? "";
 $name = $_SESSION["name"] ?? "Member";
@@ -29,7 +40,6 @@ $displayName = $username ?: ($member_code ?: $name);
 $refCode = $member_code ?: $username;
 $error = "";
 $success = "";
-
 
 $tenantStmt = $conn->prepare("
     SELECT tenant_code
@@ -48,42 +58,45 @@ $host = $_SERVER["HTTP_HOST"];
 $basePath = rtrim(dirname($_SERVER["SCRIPT_NAME"], 2), "/\\");
 
 $referralLink = $scheme . "://" . $host . $basePath . "/signup.php?tenant=" . urlencode($tenant_code) . "&ref=" . urlencode($refCode);
+
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $form_action = $_POST["form_action"] ?? "";
 
     if ($form_action === "claim_bonus") {
-        $claimCheckStmt = $conn->prepare("
-            SELECT
-                SUM(bonus_amount) AS claimable_bonus
-            FROM referral_bonuses
-            WHERE tenant_id = ?
-            AND upliner_user_id = ?
-            AND status = 'earned'
-        ");
-
-        
-        $claimCheckStmt->bind_param("ii", $tenant_id, $user_id);
-        $claimCheckStmt->execute();
-        $claimData = $claimCheckStmt->get_result()->fetch_assoc();
-
-        $claimable_bonus = (float)($claimData["claimable_bonus"] ?? 0);
-
-        if ($claimable_bonus < $minimum_claim_amount) {
-            $error = "You can only claim your bonus when it reaches R" . number_format($minimum_claim_amount, 2) . " or more.";
+        if ($enable_bonus_claims !== 1) {
+            $error = "Bonus claims are currently disabled.";
         } else {
-            $claimStmt = $conn->prepare("
-                UPDATE referral_bonuses
-                SET status = 'claimed'
+            $claimCheckStmt = $conn->prepare("
+                SELECT
+                    SUM(bonus_amount) AS claimable_bonus
+                FROM referral_bonuses
                 WHERE tenant_id = ?
                 AND upliner_user_id = ?
                 AND status = 'earned'
             ");
-            $claimStmt->bind_param("ii", $tenant_id, $user_id);
+            $claimCheckStmt->bind_param("ii", $tenant_id, $user_id);
+            $claimCheckStmt->execute();
+            $claimData = $claimCheckStmt->get_result()->fetch_assoc();
 
-            if ($claimStmt->execute()) {
-                $success = "Your bonus claim of R" . number_format($claimable_bonus, 2) . " has been submitted. Please wait for admin payout.";
+            $claimable_bonus = (float)($claimData["claimable_bonus"] ?? 0);
+
+            if ($claimable_bonus < $minimum_claim_amount) {
+                $error = "You can only claim your bonus when it reaches R" . number_format($minimum_claim_amount, 2) . " or more.";
             } else {
-                $error = "Could not submit your bonus claim. Please try again.";
+                $claimStmt = $conn->prepare("
+                    UPDATE referral_bonuses
+                    SET status = 'claimed'
+                    WHERE tenant_id = ?
+                    AND upliner_user_id = ?
+                    AND status = 'earned'
+                ");
+                $claimStmt->bind_param("ii", $tenant_id, $user_id);
+
+                if ($claimStmt->execute()) {
+                    $success = "Your bonus claim of R" . number_format($claimable_bonus, 2) . " has been submitted. Please wait for admin payout.";
+                } else {
+                    $error = "Could not submit your bonus claim. Please try again.";
+                }
             }
         }
     }
@@ -124,7 +137,7 @@ $total_bonus_records = (int)($bonusStats["total_bonus_records"] ?? 0);
 $earned_bonus = (float)($bonusStats["earned_bonus"] ?? 0);
 $claimed_bonus = (float)($bonusStats["claimed_bonus"] ?? 0);
 $paid_bonus = (float)($bonusStats["paid_bonus"] ?? 0);
-$can_claim_bonus = $earned_bonus >= $minimum_claim_amount;
+$can_claim_bonus = $earned_bonus >= $minimum_claim_amount && $enable_bonus_claims === 1;
 
 $referralsStmt = $conn->prepare("
     SELECT 
@@ -180,26 +193,39 @@ function personName($row) {
         return $row["member_code"];
     }
 
-    return trim(($row["first_name"] ?? "") . " " . ($row["last_name"] ?? ""));
+    $fullName = trim(($row["first_name"] ?? "") . " " . ($row["last_name"] ?? ""));
+
+    return $fullName !== "" ? $fullName : "Member";
+}
+
+function displayDate($dateValue) {
+    if (empty($dateValue) || $dateValue === "0000-00-00 00:00:00") {
+        return "-";
+    }
+
+    return date("d M Y H:i", strtotime($dateValue));
 }
 
 function statusBadge($status) {
+    $status = trim((string)$status);
+
     if ($status === "pending") {
-        return '<span class="badge badge-pending">Pending</span>';
+        return '<span class="ref-status status-pending">Pending</span>';
     }
 
- if ($status === "active" || $status === "earned" || $status === "paid") {
-    return '<span class="badge badge-approved">' . ucfirst(htmlspecialchars($status)) . '</span>';
-}
+    if ($status === "active" || $status === "earned" || $status === "paid") {
+        return '<span class="ref-status status-good">' . ucfirst(htmlspecialchars($status)) . '</span>';
+    }
 
-if ($status === "claimed") {
-    return '<span class="badge badge-pending">Claimed</span>';
-}
+    if ($status === "claimed") {
+        return '<span class="ref-status status-claimed">Claimed</span>';
+    }
+
     if ($status === "suspended" || $status === "cancelled") {
-        return '<span class="badge badge-rejected">' . ucfirst(htmlspecialchars($status)) . '</span>';
+        return '<span class="ref-status status-bad">' . ucfirst(htmlspecialchars($status)) . '</span>';
     }
 
-    return '<span class="badge bg-secondary">' . ucfirst(htmlspecialchars($status)) . '</span>';
+    return '<span class="ref-status status-neutral">' . ucfirst(htmlspecialchars($status ?: "Unknown")) . '</span>';
 }
 ?>
 
@@ -220,108 +246,387 @@ if ($status === "claimed") {
     <style>
         body {
             background:
-                radial-gradient(circle at 8% 10%, rgba(216, 169, 40, 0.34), transparent 30%),
-                radial-gradient(circle at 90% 20%, rgba(15, 107, 79, 0.28), transparent 32%),
-                radial-gradient(circle at 50% 90%, rgba(216, 169, 40, 0.20), transparent 34%),
-                linear-gradient(135deg, #fff4c7 0%, #fbf7ed 32%, #e7f7ef 72%, #dff5e9 100%) !important;
-            background-attachment: fixed;
+                radial-gradient(circle at 20% 0%, rgba(69, 90, 145, 0.18), transparent 34%),
+                radial-gradient(circle at 90% 10%, rgba(168, 59, 216, 0.10), transparent 30%),
+                linear-gradient(180deg, #0d1829 0%, #101a2c 50%, #0b1424 100%) !important;
+            color: rgba(255,255,255,0.82);
+            font-size: 12px;
         }
 
-        .referral-hero {
+        .app-main {
             background:
-                radial-gradient(circle at top right, rgba(216,169,40,0.34), transparent 34%),
-                linear-gradient(135deg, #0f6b4f, #073f2f);
+                radial-gradient(circle at 85% 5%, rgba(168, 59, 216, 0.10), transparent 30%),
+                linear-gradient(180deg, #0d1829 0%, #101a2c 100%) !important;
+        }
+
+        .app-topbar {
+            background:
+                linear-gradient(rgba(13,24,41,0.84), rgba(13,24,41,0.90)),
+                radial-gradient(circle at top right, rgba(59,130,246,0.12), transparent 34%) !important;
+            border-bottom: 1px solid rgba(255,255,255,0.06) !important;
             color: #ffffff;
-            border-radius: 32px;
-            padding: 30px;
-            margin-bottom: 24px;
-            box-shadow: 0 30px 80px rgba(7, 63, 47, 0.32);
+        }
+
+        .app-topbar-title,
+        .topbar-title {
+            color: rgba(255,255,255,0.84) !important;
+            font-size: 14px !important;
+            font-weight: 700 !important;
+        }
+
+        .app-topbar-subtitle,
+        .topbar-subtitle,
+        .topbar-user {
+            color: rgba(255,255,255,0.55) !important;
+            font-size: 11px !important;
+        }
+
+        .app-content::before {
+            display: none !important;
+        }
+
+        .ref-shell {
+            max-width: 980px;
+            margin: 0 auto;
+        }
+
+        .page-title {
+            font-size: 22px;
+            font-weight: 400;
+            color: rgba(255,255,255,0.66);
+            margin-bottom: 14px;
+        }
+
+        .cover-card {
+            min-height: 82px;
+            border-radius: 4px;
+            background:
+                linear-gradient(rgba(13,24,41,0.70), rgba(13,24,41,0.94)),
+                radial-gradient(circle at right top, rgba(168,59,216,0.13), transparent 30%),
+                linear-gradient(135deg, #162239, #0d1829);
+            border: 1px solid rgba(255,255,255,0.06);
+            margin-bottom: 16px;
+            padding: 16px;
             position: relative;
             overflow: hidden;
         }
 
-        .referral-hero::after {
-            content: "R";
+        .cover-card::after {
+            content: "";
             position: absolute;
-            right: 34px;
-            top: 24px;
-            width: 96px;
-            height: 96px;
-            border-radius: 50%;
-            background: linear-gradient(145deg, #f8d86a, #d8a928);
-            color: #4a3504;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 42px;
-            font-weight: 900;
-            opacity: 0.25;
-            transform: rotate(-12deg);
+            right: 20px;
+            top: 18px;
+            width: 34px;
+            height: 24px;
+            border-top: 3px solid rgba(255,255,255,0.26);
+            border-bottom: 3px solid rgba(255,255,255,0.26);
         }
 
-        .referral-kicker {
+        .status-panel {
+            background: rgba(22, 34, 57, 0.78);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 5px;
+            padding: 16px;
+            margin-bottom: 18px;
+        }
+
+        .status-title {
+            font-size: 18px;
+            font-weight: 300;
+            color: rgba(255,255,255,0.62);
+            margin-bottom: 6px;
+        }
+
+        .status-text {
+            color: rgba(255,255,255,0.34);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+
+        .summary-card {
+            background: rgba(25, 39, 64, 0.86);
+            border: 1px solid rgba(255,255,255,0.045);
+            border-radius: 5px;
+            padding: 14px;
+            box-shadow: 0 18px 32px rgba(0,0,0,0.12);
+        }
+
+        .summary-label {
+            color: rgba(255,255,255,0.40);
+            font-size: 10px;
+            margin-bottom: 5px;
+        }
+
+        .summary-value {
+            color: rgba(255,255,255,0.72);
+            font-size: 17px;
+            font-weight: 300;
+        }
+
+        .tasks-card {
+            background: linear-gradient(135deg, #ff9800, #ff7a00);
+            border-radius: 5px;
+            padding: 15px 18px;
+            color: #ffffff;
+            margin-bottom: 20px;
+            box-shadow: 0 14px 28px rgba(255,122,0,0.14);
+        }
+
+        .tasks-title {
+            color: rgba(255,255,255,0.70);
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .tasks-link {
             display: inline-flex;
             align-items: center;
-            gap: 8px;
-            background: rgba(255,255,255,0.12);
-            border: 1px solid rgba(255,255,255,0.18);
-            color: rgba(255,255,255,0.86);
-            border-radius: 999px;
-            padding: 8px 12px;
+            gap: 9px;
+            color: #ffffff;
+            text-decoration: none;
             font-size: 12px;
             font-weight: 900;
-            margin-bottom: 16px;
-            position: relative;
-            z-index: 2;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
         }
 
-        .referral-title {
-            font-size: 34px;
-            line-height: 1.05;
-            font-weight: 900;
-            letter-spacing: -0.05em;
-            margin-bottom: 8px;
-            position: relative;
-            z-index: 2;
+        .ref-grid {
+            display: grid;
+            grid-template-columns: 1fr 0.85fr;
+            gap: 16px;
+            margin-bottom: 18px;
         }
 
-        .referral-text {
-            color: rgba(255,255,255,0.78);
-            font-size: 14px;
-            line-height: 1.6;
-            max-width: 720px;
-            margin-bottom: 0;
+        .ref-card {
+            background: rgba(25, 39, 64, 0.86);
+            border: 1px solid rgba(255,255,255,0.045);
+            border-radius: 5px;
+            padding: 18px;
+            box-shadow: 0 18px 34px rgba(0,0,0,0.14);
             position: relative;
-            z-index: 2;
+            overflow: hidden;
         }
 
-        .referral-link-box {
-            background: #fffdf7;
-            border: 1px dashed rgba(216,169,40,0.48);
-            border-radius: 20px;
-            padding: 15px;
-            font-size: 13px;
+        .ref-card::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: linear-gradient(180deg, #a83bd8, #11a7d8);
+            opacity: 0.9;
+        }
+
+        .ref-card.orange::before {
+            background: linear-gradient(180deg, #ff9800, #a83bd8);
+        }
+
+        .ref-card.green::before {
+            background: linear-gradient(180deg, #32b96e, #11a7d8);
+        }
+
+        .card-title-small {
+            color: rgba(255,255,255,0.66);
+            font-size: 16px;
+            font-weight: 400;
+            margin-bottom: 6px;
+        }
+
+        .card-text-small {
+            color: rgba(255,255,255,0.36);
+            font-size: 12px;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+
+        .ref-link-box {
+            background: rgba(13,24,41,0.72);
+            border: 1px dashed rgba(168,59,216,0.36);
+            border-radius: 5px;
+            padding: 12px;
+            color: rgba(255,255,255,0.72);
+            font-size: 11px;
+            line-height: 1.5;
             word-break: break-all;
-            color: #4b3a12;
+            margin-bottom: 12px;
         }
 
-        .referral-card-gold {
-            background:
-                radial-gradient(circle at top right, rgba(216,169,40,0.30), transparent 34%),
-                linear-gradient(135deg, #ffffff 0%, #fff1b8 100%) !important;
-        }
-
-        .referral-card-green {
-            background:
-                radial-gradient(circle at top right, rgba(15,107,79,0.18), transparent 35%),
-                linear-gradient(135deg, #ffffff 0%, #def5e8 100%) !important;
-        }
-
-        .section-title {
-            font-size: 18px;
+        .btn-copy,
+        .btn-claim {
+            background: linear-gradient(135deg, #16a085, #1abc9c);
+            border: 0;
+            color: #ffffff;
+            border-radius: 999px;
+            padding: 10px 18px;
+            font-size: 11px;
             font-weight: 900;
-            letter-spacing: -0.03em;
-            color: #10241f;
+            text-transform: uppercase;
+            box-shadow: 0 14px 24px rgba(26,188,156,0.16);
+        }
+
+        .btn-disabled {
+            background: rgba(255,255,255,0.045);
+            border: 1px solid rgba(255,255,255,0.13);
+            color: rgba(255,255,255,0.50);
+            border-radius: 999px;
+            padding: 10px 16px;
+            font-size: 11px;
+            font-weight: 900;
+        }
+
+        .claim-amount {
+            font-size: 28px;
+            font-weight: 300;
+            color: rgba(255,255,255,0.76);
+            line-height: 1.1;
+            margin-bottom: 5px;
+        }
+
+        .section-heading {
+            color: rgba(255,255,255,0.46);
+            font-size: 15px;
+            font-weight: 400;
+            margin: 0 0 14px;
+        }
+
+        .tables-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .table-card {
+            background: rgba(25, 39, 64, 0.86);
+            border: 1px solid rgba(255,255,255,0.045);
+            border-radius: 5px;
+            padding: 16px;
+            box-shadow: 0 18px 34px rgba(0,0,0,0.14);
+            overflow: hidden;
+        }
+
+        .ref-table {
+            width: 100%;
+            color: rgba(255,255,255,0.68);
+            font-size: 11px;
+        }
+
+        .ref-table th {
+            color: rgba(255,255,255,0.38);
+            font-weight: 700;
+            padding: 10px 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            white-space: nowrap;
+        }
+
+        .ref-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.045);
+            vertical-align: top;
+        }
+
+        .ref-table tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .member-code-small {
+            color: rgba(255,255,255,0.34);
+            font-size: 10px;
+            margin-top: 2px;
+        }
+
+        .ref-status {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 6px 9px;
+            font-size: 9px;
+            font-weight: 900;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .status-pending,
+        .status-claimed {
+            background: rgba(255,152,0,0.12);
+            border: 1px solid rgba(255,152,0,0.20);
+            color: #ffb74d;
+        }
+
+        .status-good {
+            background: rgba(34,197,94,0.12);
+            border: 1px solid rgba(34,197,94,0.18);
+            color: #73e39b;
+        }
+
+        .status-bad {
+            background: rgba(239,68,68,0.12);
+            border: 1px solid rgba(239,68,68,0.18);
+            color: #ff8b8b;
+        }
+
+        .status-neutral {
+            background: rgba(255,255,255,0.045);
+            border: 1px solid rgba(255,255,255,0.075);
+            color: rgba(255,255,255,0.66);
+        }
+
+        .empty-row {
+            text-align: center;
+            color: rgba(255,255,255,0.38);
+            padding: 18px !important;
+        }
+
+        .alert {
+            border-radius: 5px;
+            font-size: 12px;
+            padding: 10px 12px;
+        }
+
+        .text-muted-soft {
+            color: rgba(255,255,255,0.36);
+            font-size: 11px;
+        }
+
+        @media (max-width: 1000px) {
+            .summary-grid,
+            .ref-grid,
+            .tables-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 700px) {
+            .page-title {
+                font-size: 20px;
+            }
+
+            .status-title {
+                font-size: 16px;
+            }
+
+            .summary-value {
+                font-size: 16px;
+            }
+
+            .claim-amount {
+                font-size: 23px;
+            }
+
+            .table-responsive {
+                overflow-x: auto;
+            }
+
+            .ref-table {
+                min-width: 620px;
+            }
         }
     </style>
 </head>
@@ -336,136 +641,147 @@ if ($status === "claimed") {
             <div>
                 <div class="app-topbar-title">My Referrals</div>
                 <div class="app-topbar-subtitle">
-                    Share your link and track recruitment bonus earnings.
+                    Share your Auction Express link and track referral bonuses.
                 </div>
             </div>
         </div>
 
         <div class="app-content">
+            <div class="ref-shell">
 
-            <div class="referral-hero">
-                <div class="referral-kicker">
-                    <?php echo htmlspecialchars($stokvel_name); ?>
+                <div class="page-title">
+                    My Referrals
                 </div>
 
-                <div class="referral-title">
-                    Grow your stokvel circle
-                </div>
-
-                <p class="referral-text">
-                    Hello, <strong><?php echo htmlspecialchars($displayName); ?></strong>.
-                    Share your referral link. When someone joins under you and their saving is approved,
-                    your recruitment bonus is recorded automatically.
-                </p>
-            </div>
-
-            <?php if (!empty($success)): ?>
-    <div class="alert alert-success">
-        <?php echo htmlspecialchars($success); ?>
-    </div>
-<?php endif; ?>
-
-<?php if (!empty($error)): ?>
-    <div class="alert alert-danger">
-        <?php echo htmlspecialchars($error); ?>
-    </div>
-<?php endif; ?>
-
-            <div class="row g-3 mb-4">
-                <div class="col-md-3">
-                    <div class="stat-card stat-card-green">
-                        <div class="stat-label">Total Referrals</div>
-                        <div class="stat-value"><?php echo $total_referrals; ?></div>
+                <div class="cover-card">
+                    <div style="color: rgba(255,255,255,0.40); font-size: 11px;">
+                        Auction Express · <?php echo htmlspecialchars($stokvel_name); ?>
                     </div>
                 </div>
 
-                <div class="col-md-3">
-                    <div class="stat-card stat-card-gold">
-                        <div class="stat-label">Active Referrals</div>
-                        <div class="stat-value"><?php echo $active_referrals; ?></div>
+                <?php if (!empty($success)): ?>
+                    <div class="alert alert-success">
+                        <?php echo htmlspecialchars($success); ?>
+                    </div>
+                <?php endif; ?>
+
+                <?php if (!empty($error)): ?>
+                    <div class="alert alert-danger">
+                        <?php echo htmlspecialchars($error); ?>
+                    </div>
+                <?php endif; ?>
+
+                <?php if (!$enable_referrals): ?>
+                    <div class="alert alert-warning">
+                        Referrals are currently disabled for this package.
+                    </div>
+                <?php endif; ?>
+
+                <div class="status-panel">
+                    <div class="status-title">
+                        Grow your Auction Express network
+                    </div>
+
+                    <div class="status-text">
+                        Hello, <strong><?php echo htmlspecialchars($displayName); ?></strong>.
+                        Share your referral link. When someone joins under you and qualifies, your referral bonus is recorded automatically.
+                    </div>
+
+                    <div class="status-text mt-2">
+                        Referral bonus: <strong><?php echo number_format($referralPercent, 2); ?>%</strong>
+                        · Minimum claim: <strong><?php echo money($minimum_claim_amount); ?></strong>
                     </div>
                 </div>
 
-                <div class="col-md-3">
-                    <div class="stat-card stat-card-blue">
-                        <div class="stat-label">Earned Bonus</div>
-                        <div class="stat-value"><?php echo money($earned_bonus); ?></div>
+                <div class="summary-grid">
+                    <div class="summary-card">
+                        <div class="summary-label">Total Referrals</div>
+                        <div class="summary-value"><?php echo number_format($total_referrals); ?></div>
+                    </div>
+
+                    <div class="summary-card">
+                        <div class="summary-label">Active Referrals</div>
+                        <div class="summary-value"><?php echo number_format($active_referrals); ?></div>
+                    </div>
+
+                    <div class="summary-card">
+                        <div class="summary-label">Earned Bonus</div>
+                        <div class="summary-value"><?php echo money($earned_bonus); ?></div>
+                    </div>
+
+                    <div class="summary-card">
+                        <div class="summary-label">Paid Bonus</div>
+                        <div class="summary-value"><?php echo money($paid_bonus); ?></div>
                     </div>
                 </div>
 
-                <div class="col-md-3">
-    <div class="stat-card stat-card-red">
-        <div class="stat-label">Claimed / Paid</div>
-        <div class="stat-value"><?php echo money($claimed_bonus); ?></div>
-        <div class="text-muted" style="font-size: 13px; position: relative; z-index: 2;">
-            Paid: <?php echo money($paid_bonus); ?>
-        </div>
-    </div>
-</div>
-            </div>
-<div class="card-box referral-card-green mb-4">
-    <div class="section-title mb-2">Claim Referral Bonus</div>
-
-    <p class="text-muted" style="font-size: 13px;">
-        You can claim your referral bonus when your earned bonus reaches 
-        <strong><?php echo money($minimum_claim_amount); ?></strong> or more.
-    </p>
-
-    <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap">
-        <div>
-            <div class="text-muted" style="font-size: 13px;">Available to claim</div>
-            <div style="font-size: 28px; font-weight: 900; color: #073f2f;">
-                <?php echo money($earned_bonus); ?>
-            </div>
-
-            <?php if ($claimed_bonus > 0): ?>
-                <div class="text-muted" style="font-size: 13px;">
-                    Already claimed and waiting for payout: <?php echo money($claimed_bonus); ?>
-                </div>
-            <?php endif; ?>
-        </div>
-
-        <?php if ($can_claim_bonus): ?>
-            <form method="POST">
-                <input type="hidden" name="form_action" value="claim_bonus">
-
-                <button 
-                    type="submit" 
-                    class="btn btn-dark"
-                    onclick="return confirm('Claim your available referral bonus now?');"
-                >
-                    Claim Bonus
-                </button>
-            </form>
-        <?php else: ?>
-            <button type="button" class="btn btn-outline-dark" disabled>
-                Minimum <?php echo money($minimum_claim_amount); ?>
-            </button>
-        <?php endif; ?>
-    </div>
-</div>
-            <div class="card-box referral-card-gold mb-4">
-                <div class="section-title mb-2">Your Referral Link</div>
-                <p class="text-muted" style="font-size: 13px;">
-                    Share this link with someone who wants to join the stokvel under you.
-                </p>
-
-                <div class="referral-link-box mb-3" id="referralLink">
-                    <?php echo htmlspecialchars($referralLink); ?>
+                <div class="tasks-card">
+                    <div class="tasks-title">Tasks</div>
+                    <a href="#referralLinkCard" class="tasks-link">
+                        ⚙ Copy referral link
+                    </a>
                 </div>
 
-                <button class="btn btn-dark btn-sm" onclick="copyReferralLink()">
-                    Copy Referral Link
-                </button>
-            </div>
+                <div class="ref-grid">
+                    <div class="ref-card orange" id="referralLinkCard">
+                        <div class="card-title-small">Your Referral Link</div>
 
-            <div class="row g-4">
-                <div class="col-lg-6">
-                    <div class="card-box referral-card-green">
-                        <div class="section-title mb-3">People Who Joined Under You</div>
+                        <div class="card-text-small">
+                            Share this link with someone who wants to join Auction Express under you.
+                        </div>
+
+                        <div class="ref-link-box" id="referralLink">
+                            <?php echo htmlspecialchars($referralLink); ?>
+                        </div>
+
+                        <button class="btn-copy" onclick="copyReferralLink()">
+                            Copy Link
+                        </button>
+                    </div>
+
+                    <div class="ref-card green">
+                        <div class="card-title-small">Claim Referral Bonus</div>
+
+                        <div class="card-text-small">
+                            You can claim once your earned bonus reaches the minimum claim amount.
+                        </div>
+
+                        <div class="claim-amount">
+                            <?php echo money($earned_bonus); ?>
+                        </div>
+
+                        <div class="text-muted-soft mb-3">
+                            Claimed and waiting payout: <?php echo money($claimed_bonus); ?>
+                        </div>
+
+                        <?php if ($can_claim_bonus): ?>
+                            <form method="POST">
+                                <input type="hidden" name="form_action" value="claim_bonus">
+
+                                <button 
+                                    type="submit" 
+                                    class="btn-claim"
+                                    onclick="return confirm('Claim your available referral bonus now?');"
+                                >
+                                    Claim Bonus
+                                </button>
+                            </form>
+                        <?php else: ?>
+                            <button type="button" class="btn-disabled" disabled>
+                                Minimum <?php echo money($minimum_claim_amount); ?>
+                            </button>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <div class="tables-grid">
+                    <div class="table-card">
+                        <h3 class="section-heading">
+                            People Who Joined Under You
+                        </h3>
 
                         <div class="table-responsive">
-                            <table class="table align-middle">
+                            <table class="ref-table">
                                 <thead>
                                     <tr>
                                         <th>Member</th>
@@ -481,18 +797,18 @@ if ($status === "claimed") {
                                             <tr>
                                                 <td>
                                                     <strong><?php echo htmlspecialchars(personName($row)); ?></strong>
-                                                    <div class="text-muted" style="font-size:12px;">
+                                                    <div class="member-code-small">
                                                         <?php echo htmlspecialchars($row["member_code"] ?: "-"); ?>
                                                     </div>
                                                 </td>
                                                 <td><?php echo htmlspecialchars($row["phone"] ?: "-"); ?></td>
                                                 <td><?php echo statusBadge($row["status"]); ?></td>
-                                                <td><?php echo date("d M Y", strtotime($row["created_at"])); ?></td>
+                                                <td><?php echo htmlspecialchars(displayDate($row["created_at"])); ?></td>
                                             </tr>
                                         <?php endwhile; ?>
                                     <?php else: ?>
                                         <tr>
-                                            <td colspan="4" class="text-center text-muted py-4">
+                                            <td colspan="4" class="empty-row">
                                                 No one has joined under your link yet.
                                             </td>
                                         </tr>
@@ -501,18 +817,18 @@ if ($status === "claimed") {
                             </table>
                         </div>
                     </div>
-                </div>
 
-                <div class="col-lg-6">
-                    <div class="card-box referral-card-gold">
-                        <div class="section-title mb-3">Bonus History</div>
+                    <div class="table-card">
+                        <h3 class="section-heading">
+                            Bonus History
+                        </h3>
 
                         <div class="table-responsive">
-                            <table class="table align-middle">
+                            <table class="ref-table">
                                 <thead>
                                     <tr>
-                                        <th>Referred Member</th>
-                                        <th>Saving</th>
+                                        <th>Member</th>
+                                        <th>Amount</th>
                                         <th>Bonus</th>
                                         <th>Status</th>
                                         <th>Date</th>
@@ -529,17 +845,17 @@ if ($status === "claimed") {
                                                 <td><?php echo money($row["saving_amount"]); ?></td>
                                                 <td>
                                                     <strong><?php echo money($row["bonus_amount"]); ?></strong>
-                                                    <div class="text-muted" style="font-size:12px;">
+                                                    <div class="member-code-small">
                                                         <?php echo number_format((float)$row["bonus_percent"], 2); ?>%
                                                     </div>
                                                 </td>
                                                 <td><?php echo statusBadge($row["status"]); ?></td>
-                                                <td><?php echo date("d M Y H:i", strtotime($row["created_at"])); ?></td>
+                                                <td><?php echo htmlspecialchars(displayDate($row["created_at"])); ?></td>
                                             </tr>
                                         <?php endwhile; ?>
                                     <?php else: ?>
                                         <tr>
-                                            <td colspan="5" class="text-center text-muted py-4">
+                                            <td colspan="5" class="empty-row">
                                                 No bonus records yet.
                                             </td>
                                         </tr>
@@ -549,8 +865,8 @@ if ($status === "claimed") {
                         </div>
                     </div>
                 </div>
-            </div>
 
+            </div>
         </div>
     </main>
 
@@ -560,11 +876,36 @@ if ($status === "claimed") {
 function copyReferralLink() {
     const text = document.getElementById("referralLink").innerText.trim();
 
-    navigator.clipboard.writeText(text).then(function () {
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(function () {
+            alert("Referral link copied.");
+        }).catch(function () {
+            fallbackCopy(text);
+        });
+
+        return;
+    }
+
+    fallbackCopy(text);
+}
+
+function fallbackCopy(text) {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+
+    try {
+        document.execCommand("copy");
         alert("Referral link copied.");
-    }).catch(function () {
+    } catch (e) {
         alert("Could not copy link. Please copy it manually.");
-    });
+    }
+
+    document.body.removeChild(area);
 }
 </script>
 

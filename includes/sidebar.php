@@ -69,7 +69,12 @@ $isAuctionPackage = function_exists("packageIsAuction")
 $isSavingsPackage = !$isAuctionPackage;
 
 $showGroupChat = (int)($packageRules["enable_group_chat"] ?? 1) === 1;
-$showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ?? 0) === 1;
+
+/*
+    Referrals must show for auction packages as well.
+    For savings, it still follows the package setting.
+*/
+$showReferrals = $isAuctionPackage || ((int)($packageRules["enable_referrals"] ?? 0) === 1);
 ?>
 
 <button type="button" class="mobile-menu-button" onclick="toggleSidebar()" aria-label="Open menu">
@@ -108,7 +113,7 @@ $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ??
 
         <div class="sidebar-section">
             <div class="sidebar-section-title">
-                <?php echo $isAuctionPackage ? "Admin" : "Admin"; ?>
+                Admin
             </div>
 
             <?php
@@ -158,10 +163,6 @@ $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ??
                     sidebarLink($appBase . "/" . $memberFolder . "/withdrawals.php", "withdrawals.php", "My Withdrawals", "⇄");
                     sidebarLink($appBase . "/" . $memberFolder . "/statements.php", "statements.php", "My Statement", "▤");
                 ?>
-
-                <?php if ($showReferrals): ?>
-                    <?php sidebarLink($appBase . "/" . $memberFolder . "/referrals.php", "referrals.php", "My Referrals", "⌖"); ?>
-                <?php endif; ?>
             <?php endif; ?>
 
             <?php if ($isAuctionPackage): ?>
@@ -172,6 +173,10 @@ $showReferrals = $isSavingsPackage && (int)($packageRules["enable_referrals"] ??
                     sidebarLink($appBase . "/" . $memberFolder . "/sell_shares.php", "sell_shares.php", "Sell Shares", "▤");
                     sidebarLink($appBase . "/" . $memberFolder . "/auction_history.php", "auction_history.php", "Auction History", "☷");
                 ?>
+            <?php endif; ?>
+
+            <?php if ($showReferrals): ?>
+                <?php sidebarLink($appBase . "/" . $memberFolder . "/referrals.php", "referrals.php", "My Referrals", "⌖"); ?>
             <?php endif; ?>
 
             <?php if ($showGroupChat): ?>
