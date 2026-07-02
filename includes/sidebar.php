@@ -115,13 +115,12 @@ $showReferrals = $isAuctionPackage || ((int)($packageRules["enable_referrals"] ?
             <div class="sidebar-section-title">
                 Admin
             </div>
-
-            <?php
-                sidebarLink($appBase . "/admin/dashboard.php", "dashboard.php", "Dashboard", "▦");
-                sidebarLink($appBase . "/admin/members.php", "members.php", "Members", "●");
-                sidebarLink($appBase . "/admin/admins.php", "admins.php", "Admin Users", "♟");
-            ?>
-
+<?php
+    sidebarLink($appBase . "/admin/dashboard.php", "dashboard.php", "Dashboard", "▦");
+    sidebarLink($appBase . "/admin/members.php", "members.php", "Members", "●");
+    sidebarLink($appBase . "/admin/admins.php", "admins.php", "Admin Users", "♟");
+    sidebarLink($appBase . "/admin/referrals.php", "referrals.php", "Referrals", "⌖");
+?>
             <?php if ($isSavingsPackage): ?>
                 <?php
                     sidebarLink($appBase . "/admin/savings_requests.php", "savings_requests.php", "Saving Requests", "▣");
